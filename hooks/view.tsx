@@ -30,9 +30,9 @@ export type PaneModel = {
   isDocked: boolean
 }
 
-export type SectionLine = { kind: Kind; isOpen: boolean; count: number; offCount: number }
-export type ItemLine = { item: Item; isInSection: boolean }
-export type Line = SectionLine | ItemLine
+type SectionLine = { kind: Kind; isOpen: boolean; count: number; offCount: number }
+type ItemLine = { item: Item; isInSection: boolean }
+type Line = SectionLine | ItemLine
 
 const CHROME_ROWS = 13
 const FRAME_COLUMNS = 4
@@ -54,6 +54,10 @@ const ACTION_KEY_PREFIX = 'action:'
 const APPLIED_COLOR = 'success'
 const PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate', 'rename', 'delete']
 const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate']
+const NAME_FIELDS = {
+  new: { key: 'new-profile-name', verb: 'Duplicate', submitLabel: 'create' },
+  rename: { key: 'rename-profile-name', verb: 'Rename', submitLabel: 'rename' },
+} as const
 
 const clipEnd = (text: string, width: number) =>
   text.length > width ? `${text.slice(0, Math.max(1, width - 1))}…` : text
@@ -61,24 +65,21 @@ const clipEnd = (text: string, width: number) =>
 const clipStart = (text: string, width: number) =>
   text.length > width ? `…${text.slice(text.length - Math.max(1, width - 1))}` : text
 
-export const visibleItems = (items: readonly Item[], view: View) =>
-  items.filter(item => view.scope === ALL || item.scope === view.scope)
-
-export const actionsOf = (name: string) =>
+const actionsOf = (name: string) =>
   isFixedProfile(name) ? FIXED_PROFILE_ACTIONS : PROFILE_ACTIONS
 
-export const pageSize = (rows: number, menuRows = 0) =>
+const pageSize = (rows: number, menuRows = 0) =>
   Math.max(MIN_LIST_ROWS, rows - CHROME_ROWS - menuRows)
 
-export const withToggledSection = (open: readonly Kind[], kind: Kind): Kind[] =>
+const withToggledSection = (open: readonly Kind[], kind: Kind): Kind[] =>
   open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind]
 
-export const linesOf = (
+const linesOf = (
   items: readonly Item[],
   isOn: (item: Item) => boolean,
   view: View,
 ): Line[] => {
-  const visible = visibleItems(items, view)
+  const visible = items.filter(item => view.scope === ALL || item.scope === view.scope)
 
   return KINDS.flatMap((kind): Line[] => {
     const ofKind = visible.filter(item => item.kind === kind)
@@ -140,7 +141,26 @@ export const drawPane = (
       label: scope,
     })),
   ]
-  const closeEdit = () => actions.onView({ edit: 'none' })
+  const drawNameField = (edit: keyof typeof NAME_FIELDS, onSubmit: (name: string) => void) => (
+    <Box flexDirection="row" gap={1}>
+      <Input
+        key={NAME_FIELDS[edit].key}
+        label={`${NAME_FIELDS[edit].verb} "${view.target}"`}
+        placeholder="name"
+        {...(edit === 'rename' ? { value: view.target } : {})}
+        submitLabel={NAME_FIELDS[edit].submitLabel}
+        autoFocus
+        onSubmit={onSubmit}
+      />
+      <Button
+        key="cancel-edit"
+        plain
+        dimColor
+        label="Cancel"
+        onPress={() => actions.onView({ edit: 'none' })}
+      />
+    </Box>
+  )
 
   const drawSection = (line: SectionLine) => (
     <Box flexDirection="row" gap={1}>
@@ -286,33 +306,8 @@ export const drawPane = (
       )}
       <Box flexGrow={1} />
       {view.notice !== '' && <Text dimColor>{clipEnd(view.notice, columns * 2)}</Text>}
-      {view.edit === 'new' && (
-        <Box flexDirection="row" gap={1}>
-          <Input
-            key="new-profile-name"
-            label={`Duplicate "${view.target}"`}
-            placeholder="name"
-            submitLabel="create"
-            autoFocus
-            onSubmit={actions.onCreate}
-          />
-          <Button key="cancel-edit" plain dimColor label="Cancel" onPress={closeEdit} />
-        </Box>
-      )}
-      {isRenaming && (
-        <Box flexDirection="row" gap={1}>
-          <Input
-            key="rename-profile-name"
-            label={`Rename "${view.target}"`}
-            placeholder="name"
-            value={view.target}
-            submitLabel="rename"
-            autoFocus
-            onSubmit={actions.onRename}
-          />
-          <Button key="cancel-edit" plain dimColor label="Cancel" onPress={closeEdit} />
-        </Box>
-      )}
+      {view.edit === 'new' && drawNameField('new', actions.onCreate)}
+      {isRenaming && drawNameField('rename', actions.onRename)}
       <Box key="profile-tabs" flexDirection="row" gap={2} flexWrap="wrap" {...FRAME}>
         {profiles.map(drawProfile)}
         <Button

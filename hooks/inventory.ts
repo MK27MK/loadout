@@ -6,7 +6,7 @@ import { KINDS, PLUGIN } from './model'
 import { entriesOf, hookEventOf, isObject } from './settingsEdit'
 import type { SettingsObject, SettingsSourceName } from './settingsEdit'
 
-export type Found = { items: Item[]; warnings: string[] }
+type Found = { items: Item[]; warnings: string[] }
 export type SettingsReading =
   | { source: SettingsSourceName; origin: string; value: SettingsObject }
   | { warning: string }
