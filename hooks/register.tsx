@@ -27,7 +27,6 @@ import {
 } from './inventory'
 import type { SettingsReading } from './inventory'
 import {
-  DEFAULT_PROFILE,
   DEFAULT_PROFILE_NAME,
   EMPTY_LEDGER,
   INITIAL_PROFILES,
@@ -78,7 +77,7 @@ const LOCKED_SOURCES = [
 const READ_ONLY_VERBS = ['', 'list', 'status']
 const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
 const USAGE =
-  'Usage: /loadout [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | restore | project [<folder>]]'
+  'Usage: /loadout [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | project [<folder>]]'
 const NO_ITEMS: Item[] = []
 const NO_PROJECTS: string[] = []
 const MAX_RULES_DEPTH = 4
@@ -649,25 +648,6 @@ const deleteProfile = async ($: EngineInterface, name: string) => {
   return say($, `Profile "${name}" deleted.`)
 }
 
-const restoreAll = async ($: EngineInterface) => {
-  const profiles = await profilesOf($)
-  const applied = await activeProfile($)
-  const kept = isFixedProfile(applied.name) ? fallbackProfile(profiles) : applied
-  const untouched: Profile = {
-    ...DEFAULT_PROFILE,
-    name: isFixedProfile(kept.name) ? DEFAULT_PROFILE_NAME : kept.name,
-  }
-  await saveProfiles($, upsertProfile(profiles, untouched))
-  const { errors } = await activate($, untouched)
-
-  return say(
-    $,
-    errors.length === 0
-      ? `Everything loadout turned off is back on; profile "${untouched.name}" is active.`
-      : `Profile "${untouched.name}" is active, but these were not restored: ${errors.join('; ')}.`,
-  )
-}
-
 const nameFirstProfile = async ($: EngineInterface) => {
   const name = (await $.ui.ask(FIRST_NAME_QUESTION, FIRST_NAME_OPTIONS)).trim()
   if (name === DEFAULT_PROFILE_NAME) return
@@ -762,7 +742,6 @@ const runCommand = async ($: EngineInterface, args: string, origin: PromptOrigin
   if (verb === 'list') return listProfiles($)
   if (verb === 'status') return status($)
   if (verb === 'project') return showProject($, name)
-  if (verb === 'restore') return inTurn($, () => restoreAll($))
   if (verb === 'use' && name !== '') return inTurn($, () => switchProfile($, name))
   if (verb === 'delete' && name !== '') return inTurn($, () => deleteProfile($, name))
   if (verb === 'rename' && name !== '' && option !== '')
@@ -781,7 +760,7 @@ export const register: Register = on => {
       name: 'loadout',
       description: 'Manage harness profiles, scopes and on/off for every harness element',
       argumentHint:
-        '[list | status | use <profile> | new <profile> | rename <profile> <new name> | delete <profile> | restore | project [<folder>]]',
+        '[list | status | use <profile> | new <profile> | rename <profile> <new name> | delete <profile> | project [<folder>]]',
     })
     try {
       const isFirstRun = await loadOnce($)
@@ -1042,7 +1021,6 @@ export const register: Register = on => {
           void inTurn($, () =>
             submitName($, typed, name => renameTo($, view.target, name)),
           ).catch(report),
-        onRestore: () => void inTurn($, () => restoreAll($)).catch(report),
         onRefresh: () =>
           void refresh($)
             .then(() => refreshProjects($))

@@ -14,7 +14,6 @@ export type PaneActions = {
   onAction: (name: string, action: ProfileAction) => void
   onCreate: (name: string) => void
   onRename: (name: string) => void
-  onRestore: () => void
   onRefresh: () => void
   onProject: (path: string) => void
   onView: (patch: Partial<View>) => void
@@ -40,7 +39,7 @@ type Line = SectionLine | ItemLine
 type PickerOption = { value: string; label: string }
 type OpenPicker = Exclude<Picker, 'none'>
 
-const CHROME_ROWS = 13
+const CHROME_ROWS = 15
 const FRAME_COLUMNS = 4
 const FRAME = { borderStyle: 'round', borderDimColor: true, paddingX: 1 } as const
 const MIN_LIST_ROWS = 3
@@ -358,9 +357,8 @@ export const drawPane = (
           </Text>
           <Text dimColor>{profile.name}</Text>
         </Box>
-        <Box flexDirection="row" gap={2}>
-          <Button key="refresh" plain dimColor label="Refresh" hotkey="r" onPress={actions.onRefresh} />
-          <Button key="restore" plain dimColor label="Restore all" onPress={actions.onRestore} />
+        <Box key="refresh-frame" {...FRAME}>
+          <Button key="refresh" plain dimColor label="Refresh" onPress={actions.onRefresh} />
         </Box>
       </Box>
       <Box flexDirection="row" gap={2} marginBottom={1}>

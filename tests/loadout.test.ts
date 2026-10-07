@@ -408,16 +408,6 @@ test('refuses to rewrite a settings file that is not valid JSON', async ($, on) 
   expect(files.backup()).toBeUndefined()
 })
 
-test('restore brings everything back and returns to default', async ($, on) => {
-  const files = harness(on)
-  await loadout($, 'use vanilla')
-
-  const answer = await loadout($, 'restore')
-
-  expect(answer.text).toContain('back on')
-  expect(files.userSettings()).toEqual(USER_SETTINGS)
-})
-
 test('never replays a hook stashed in one project into another project', async ($, on) => {
   const files = harness(on, USER_SETTINGS, {
     files: { [PROJECT_SETTINGS_PATH]: JSON.stringify({ hooks: { Stop: [PROJECT_HOOK] } }) },
@@ -426,7 +416,7 @@ test('never replays a hook stashed in one project into another project', async (
   const whenOff = files.json(PROJECT_SETTINGS_PATH)
   files.moveTo('/work/other')
 
-  await loadout($, 'restore')
+  await loadout($, 'use default')
 
   expect(whenOff).toEqual({ hooks: { Stop: [] } })
   expect(files.has('/work/other/.claude/settings.json')).toBe(false)
@@ -477,7 +467,7 @@ test('keeps both entries when two toggles are pressed without waiting', async ($
 
   await Promise.all([ui.press({ key: rule }), ui.press({ key: theme })])
   const whenOff = files.userSettings()
-  await loadout($, 'restore')
+  await Promise.all([ui.press({ key: rule }), ui.press({ key: theme })])
 
   expect(whenOff).toEqual({ enabledPlugins: { 'ecc@ecc': true }, permissions: { deny: [] } })
   expect(files.userSettings()).toEqual(USER_SETTINGS)
@@ -729,36 +719,6 @@ test('deletes a profile that is not applied and leaves the applied one alone', a
   await ui.unmount()
 })
 
-test('restore resets the applied profile and brings no default back', async ($, on) => {
-  const files = harness(on)
-  await loadout($, 'rename default mine')
-  await loadout($, 'status')
-  const ui = await mountPaneWithOpen($, 'plugin')
-  await ui.press({ key: `toggle:plugin:${USER_SETTINGS_PATH}:enabledPlugins.ecc@ecc:` })
-
-  const answer = await loadout($, 'restore')
-  const listed = await loadout($, 'list')
-
-  expect(answer.text).toContain('profile "mine" is active')
-  expect(listed.text).toBe(
-    '* mine (0 overrides)\n  vanilla (0 overrides)',
-  )
-  expect(files.userSettings()).toEqual(USER_SETTINGS)
-  await ui.unmount()
-})
-
-test('restore under vanilla goes back to the profile that carries the setup', async ($, on) => {
-  harness(on)
-  await loadout($, 'rename default mine')
-  await loadout($, 'use vanilla')
-
-  await loadout($, 'restore')
-
-  expect((await loadout($, 'list')).text).toBe(
-    '* mine (0 overrides)\n  vanilla (0 overrides)',
-  )
-})
-
 test('closes the name field of a profile once that profile is deleted', async ($, on) => {
   harness(on)
   await loadout($, 'new temp off')
@@ -931,6 +891,20 @@ test('draws one arrow, beside the profile whose harness is shown', async ($, on)
   expect(await ui.find({ key: 'menu:vanilla' })).toBeDefined()
   expect(await ui.find({ key: 'menu:default' })).toBeUndefined()
   expect(await ui.findAll({ type: 'Select', text: /[▸▾]/ })).toEqual([])
+  await ui.unmount()
+})
+
+test('frames the refresh button and gives it no hotkey', async ($, on) => {
+  harness(on)
+  await loadout($, 'status')
+  const ui = await mountPane($)
+
+  const frame = await ui.find({ key: 'refresh-frame' })
+  const refresh = await ui.find({ key: 'refresh' })
+
+  expect(frame?.props.borderStyle).toBe('round')
+  expect(refresh?.props.hotkey).toBeUndefined()
+  expect(await ui.find({ key: 'restore' })).toBeUndefined()
   await ui.unmount()
 })
 
