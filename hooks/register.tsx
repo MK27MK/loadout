@@ -174,6 +174,13 @@ const invalidateGates = ($: EngineInterface) => {
   $.ui.invalidate('command.describe')
 }
 
+const forgetProfile = ($: EngineInterface, name: string) =>
+  update($, viewAtom, view => ({
+    ...view,
+    ...(view.target === name ? { edit: 'none' as const, target: '' } : {}),
+    ...(view.focused === name ? { focused: '' } : {}),
+  }))
+
 const saveProfiles = async ($: EngineInterface, profiles: Profile[]) => {
   await update($, profilesAtom, () => profiles)
   await $.store.set(PROFILES_KEY, profiles)
@@ -259,11 +266,12 @@ const refresh = async ($: EngineInterface) => {
 
 const load = async ($: EngineInterface) => {
   const stored = await $.store.get(PROFILES_KEY)
+  const isFirstRun = stored === undefined
+  const kept = Array.isArray(stored) ? stored.filter(isProfile) : []
   const { profiles, active } = restoredProfiles(
-    Array.isArray(stored) ? stored.filter(isProfile) : undefined,
+    isFirstRun ? undefined : kept,
     await $.store.get(ACTIVE_KEY),
   )
-  const isFirstRun = !Array.isArray(stored)
   await update($, profilesAtom, () => profiles)
   await update($, activeAtom, () => active)
   if (isFirstRun) await $.store.set(PROFILES_KEY, profiles)
@@ -408,6 +416,7 @@ const renameTo = async ($: EngineInterface, from: string, to: string) => {
   const problem = nameProblem(profiles, to)
   if (problem !== undefined) return say($, problem)
   await saveProfiles($, renameProfile(profiles, from, to))
+  await forgetProfile($, from)
   if ((await read($, activeAtom)) === from) {
     await update($, activeAtom, () => to)
     await $.store.set(ACTIVE_KEY, to)
@@ -442,19 +451,27 @@ const deleteProfile = async ($: EngineInterface, name: string) => {
       return say($, `Profile "${name}" was kept; leaving it failed: ${errors.join('; ')}.`)
   }
   await saveProfiles($, kept)
+  await forgetProfile($, name)
 
   return say($, `Profile "${name}" deleted.`)
 }
 
 const restoreAll = async ($: EngineInterface) => {
-  await saveProfiles($, upsertProfile(await read($, profilesAtom), DEFAULT_PROFILE))
-  const { errors } = await activate($, DEFAULT_PROFILE)
+  const profiles = await read($, profilesAtom)
+  const applied = await activeProfile($)
+  const kept = isFixedProfile(applied.name) ? fallbackProfile(profiles) : applied
+  const untouched: Profile = {
+    ...DEFAULT_PROFILE,
+    name: isFixedProfile(kept.name) ? DEFAULT_PROFILE_NAME : kept.name,
+  }
+  await saveProfiles($, upsertProfile(profiles, untouched))
+  const { errors } = await activate($, untouched)
 
   return say(
     $,
     errors.length === 0
-      ? 'Everything pristine turned off is back on; profile "default" is active.'
-      : `Profile "default" is active, but these were not restored: ${errors.join('; ')}.`,
+      ? `Everything pristine turned off is back on; profile "${untouched.name}" is active.`
+      : `Profile "${untouched.name}" is active, but these were not restored: ${errors.join('; ')}.`,
   )
 }
 
@@ -778,11 +795,15 @@ export const register: Register = on => {
 
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
     const answered = await next(e)
-    const focused = profileOfKey(e.element)
-    if ((await read($, viewAtom)).focused !== focused) await setView($, { focused })
+    try {
+      const focused = profileOfKey(e.element)
+      if ((await read($, viewAtom)).focused !== focused) await setView($, { focused })
+    } catch (error) {
+      $.ui.log(`pristine could not follow the focus: ${messageOf(error)}`, { to: 'debug' })
+    }
 
     return answered
-  }).catch(($, e, next) => next(e))
+  })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)

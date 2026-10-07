@@ -640,6 +640,48 @@ test('deletes a profile that is not applied and leaves the applied one alone', a
   await ui.unmount()
 })
 
+test('restore resets the applied profile and brings no default back', async ($, on) => {
+  const files = harness(on)
+  await pristine($, 'rename default mine')
+  await pristine($, 'status')
+  const ui = await mountPaneWithOpen($, 'plugin')
+  await ui.press({ key: `toggle:plugin:${USER_SETTINGS_PATH}:enabledPlugins.ecc@ecc:` })
+
+  const answer = await pristine($, 'restore')
+  const listed = await pristine($, 'list')
+
+  expect(answer.text).toContain('profile "mine" is active')
+  expect(listed.text).toBe(
+    '* mine (base on, 0 overrides)\n  vanilla (base off, 0 overrides)',
+  )
+  expect(files.userSettings()).toEqual(USER_SETTINGS)
+  await ui.unmount()
+})
+
+test('restore under vanilla goes back to the profile that carries the setup', async ($, on) => {
+  harness(on)
+  await pristine($, 'rename default mine')
+  await pristine($, 'use vanilla')
+
+  await pristine($, 'restore')
+
+  expect((await pristine($, 'list')).text).toBe(
+    '* mine (base on, 0 overrides)\n  vanilla (base off, 0 overrides)',
+  )
+})
+
+test('closes the name field of a profile once that profile is deleted', async ($, on) => {
+  harness(on)
+  await pristine($, 'new temp off')
+  const ui = await mountPane($)
+
+  await ui.select({ key: 'profile:temp', value: 'duplicate' })
+  await ui.select({ key: 'profile:temp', value: 'delete' })
+
+  expect(await ui.find({ key: 'new-profile-name' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('never changes vanilla, whatever is toggled under it', async ($, on) => {
   harness(on)
   await pristine($, 'use vanilla')
