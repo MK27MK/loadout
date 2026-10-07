@@ -2,11 +2,13 @@ import type { Item, Kind, Ledger, Profile, Scope } from '../types'
 
 export const PLUGIN = 'pristine'
 export const DEFAULT_PROFILE_NAME = 'default'
-export const PRISTINE_PROFILE_NAME = 'pristine'
+export const VANILLA_PROFILE_NAME = 'vanilla'
 export const BUILTIN_PROFILES: readonly Profile[] = [
   { name: DEFAULT_PROFILE_NAME, base: 'on', overrides: {} },
-  { name: PRISTINE_PROFILE_NAME, base: 'off', overrides: {} },
+  { name: VANILLA_PROFILE_NAME, base: 'off', overrides: {} },
 ]
+
+const LEGACY_VANILLA_PROFILE_NAME = 'pristine'
 
 const PROFILE_NAME = /^[A-Za-z0-9_-]{1,40}$/
 const KINDS_KEPT_BY_BASE: readonly Kind[] = ['permission', 'setting']
@@ -40,6 +42,16 @@ export const SCOPES: readonly Scope[] = [
 ]
 
 export const isValidProfileName = (name: string) => PROFILE_NAME.test(name)
+
+export const nameProblem = (profiles: readonly Profile[], name: string) => {
+  if (name === '') return 'A profile name is required.'
+  if (!isValidProfileName(name))
+    return 'A profile name is 1-40 letters, digits, "-" or "_".'
+  if (profiles.some(profile => profile.name === name))
+    return `Profile "${name}" already exists.`
+
+  return undefined
+}
 
 export const isBuiltinProfile = (name: string) =>
   BUILTIN_PROFILES.some(profile => profile.name === name)
@@ -96,9 +108,32 @@ export const removeProfile = (
   name: string,
 ): Profile[] => profiles.filter(profile => profile.name !== name)
 
+export const renameProfile = (
+  profiles: readonly Profile[],
+  from: string,
+  to: string,
+): Profile[] =>
+  profiles.map(profile => (profile.name === from ? { ...profile, name: to } : profile))
+
+const currentNameOf = (name: string) =>
+  name === LEGACY_VANILLA_PROFILE_NAME ? VANILLA_PROFILE_NAME : name
+
+export const withoutLegacyNames = (profiles: readonly Profile[]): Profile[] =>
+  profiles.some(profile => profile.name === VANILLA_PROFILE_NAME)
+    ? [...profiles]
+    : renameProfile(profiles, LEGACY_VANILLA_PROFILE_NAME, VANILLA_PROFILE_NAME)
+
 export const withBuiltins = (profiles: readonly Profile[]): Profile[] => [
   ...BUILTIN_PROFILES.map(
     builtin => profiles.find(one => one.name === builtin.name) ?? builtin,
   ),
   ...profiles.filter(profile => !isBuiltinProfile(profile.name)),
 ]
+
+export const restoredProfiles = (stored: readonly Profile[], wanted: unknown) => {
+  const profiles = withBuiltins(withoutLegacyNames(stored))
+  const isNamed = (name: unknown) => profiles.some(profile => profile.name === name)
+  const carried = isNamed(wanted) ? String(wanted) : currentNameOf(String(wanted))
+
+  return { profiles, active: isNamed(carried) ? carried : DEFAULT_PROFILE_NAME }
+}

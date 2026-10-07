@@ -1,6 +1,6 @@
 {
   "name": "pristine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "Mattia Carella" },
   "description": "Harness manager: switchable profiles, scope provenance and on/off for every harness element",
   "types": "./types/index.d.ts"

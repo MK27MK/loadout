@@ -7,15 +7,19 @@ import {
   findProfile,
   isEnabled,
   isValidProfileName,
+  nameProblem,
   removeProfile,
+  renameProfile,
+  restoredProfiles,
   upsertProfile,
   withBuiltins,
+  withoutLegacyNames,
   withOverride,
 } from '../hooks/model'
 import type { Item, Profile } from '../types'
 
 const DEFAULT = BUILTIN_PROFILES[0]!
-const PRISTINE = BUILTIN_PROFILES[1]!
+const VANILLA = BUILTIN_PROFILES[1]!
 const SKILL: Item = {
   id: 'skill:ecc:plan',
   kind: 'skill',
@@ -55,30 +59,30 @@ const DENY_RULE: Item = {
 describe('isEnabled', () => {
   test('follows the profile base when no override exists', () => {
     expect(isEnabled(DEFAULT, SKILL)).toBe(true)
-    expect(isEnabled(PRISTINE, SKILL)).toBe(false)
+    expect(isEnabled(VANILLA, SKILL)).toBe(false)
   })
 
   test('lets an override win over the base', () => {
-    const composed = withOverride(PRISTINE, SKILL.id, true)
+    const composed = withOverride(VANILLA, SKILL.id, true)
 
     expect(isEnabled(composed, SKILL)).toBe(true)
   })
 
   test('keeps a locked item on whatever the profile says', () => {
     const locked = { ...SKILL, isLocked: true }
-    const forcedOff = withOverride(PRISTINE, SKILL.id, false)
+    const forcedOff = withOverride(VANILLA, SKILL.id, false)
 
     expect(isEnabled(forcedOff, locked)).toBe(true)
   })
 
   test('keeps permissions on under an all-off base', () => {
-    expect(isEnabled(PRISTINE, DENY_RULE)).toBe(true)
+    expect(isEnabled(VANILLA, DENY_RULE)).toBe(true)
   })
 })
 
 describe('desiredState', () => {
   test('turns a plugin off under an all-off base', () => {
-    expect(desiredState(PRISTINE, PLUGIN_FLAG, EMPTY_LEDGER)).toBe(false)
+    expect(desiredState(VANILLA, PLUGIN_FLAG, EMPTY_LEDGER)).toBe(false)
   })
 
   test('restores under an all-on base only what pristine turned off', () => {
@@ -97,9 +101,9 @@ describe('desiredState', () => {
   })
 
   test('never removes a permission rule without an explicit override', () => {
-    expect(desiredState(PRISTINE, DENY_RULE, EMPTY_LEDGER)).toBe(true)
+    expect(desiredState(VANILLA, DENY_RULE, EMPTY_LEDGER)).toBe(true)
     expect(
-      desiredState(withOverride(PRISTINE, DENY_RULE.id, false), DENY_RULE, EMPTY_LEDGER),
+      desiredState(withOverride(VANILLA, DENY_RULE.id, false), DENY_RULE, EMPTY_LEDGER),
     ).toBe(false)
   })
 })
@@ -132,14 +136,60 @@ describe('profiles', () => {
     expect(removeProfile([...BUILTIN_PROFILES, custom], 'ecc-react').length).toBe(2)
   })
 
-  test('withBuiltins always carries default and pristine first', () => {
+  test('withBuiltins always carries default and vanilla first', () => {
     const custom: Profile = { name: 'ecc-react', base: 'off', overrides: {} }
 
     expect(withBuiltins([custom]).map(profile => profile.name)).toEqual([
       'default',
-      'pristine',
+      'vanilla',
       'ecc-react',
     ])
+  })
+
+  test('renameProfile renames only the named profile and keeps its place', () => {
+    const custom: Profile = { name: 'temp', base: 'off', overrides: { [SKILL.id]: true } }
+    const profiles = [DEFAULT, custom, VANILLA]
+
+    const renamed = renameProfile(profiles, 'temp', 'ecc-react')
+
+    expect(renamed).toEqual([DEFAULT, { ...custom, name: 'ecc-react' }, VANILLA])
+    expect(custom.name).toBe('temp')
+  })
+
+  test('withoutLegacyNames turns a stored pristine profile into vanilla', () => {
+    const legacy: Profile = { name: 'pristine', base: 'off', overrides: { [SKILL.id]: true } }
+
+    expect(withoutLegacyNames([legacy])).toEqual([{ ...legacy, name: 'vanilla' }])
+  })
+
+  test('withoutLegacyNames leaves the profiles alone once vanilla is stored', () => {
+    const legacy: Profile = { name: 'pristine', base: 'off', overrides: {} }
+    const profiles = [legacy, VANILLA]
+
+    expect(withoutLegacyNames(profiles)).toEqual(profiles)
+  })
+
+  test('restoredProfiles carries a stored pristine profile and its selection to vanilla', () => {
+    const legacy: Profile = { name: 'pristine', base: 'off', overrides: { [SKILL.id]: true } }
+
+    const restored = restoredProfiles([legacy], 'pristine')
+
+    expect(restored).toEqual({
+      profiles: [DEFAULT, { ...legacy, name: 'vanilla' }],
+      active: 'vanilla',
+    })
+  })
+
+  test('restoredProfiles falls back to default when the stored selection is gone', () => {
+    expect(restoredProfiles([], 'deleted').active).toBe('default')
+    expect(restoredProfiles([], undefined).active).toBe('default')
+  })
+
+  test('nameProblem asks for a name, a valid one, and one not taken', () => {
+    expect(nameProblem(BUILTIN_PROFILES, '')).toBe('A profile name is required.')
+    expect(nameProblem(BUILTIN_PROFILES, '../etc')).toContain('A profile name is 1-40')
+    expect(nameProblem(BUILTIN_PROFILES, 'vanilla')).toBe('Profile "vanilla" already exists.')
+    expect(nameProblem(BUILTIN_PROFILES, 'ecc-react')).toBeUndefined()
   })
 
   test('rejects profile names with spaces or path characters', () => {

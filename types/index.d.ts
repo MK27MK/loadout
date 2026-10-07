@@ -57,11 +57,14 @@ export type Profile = {
   overrides: Record<string, boolean>
 }
 
+export type ProfileEdit = 'none' | 'new' | 'rename'
+
 export type View = {
-  kind: Kind | 'all'
+  open: Kind[]
   scope: Scope | 'all'
   page: number
   notice: string
+  edit: ProfileEdit
 }
 
 export type Stash = Record<string, Item>
@@ -78,7 +81,7 @@ declare module 'claude-code' {
       active: string
       seen: Item[]
       items: Item[]
-      view: View
+      view: Shaped<View>
     }
   }
 }
