@@ -1,7 +1,7 @@
 import type { Elements } from 'claude-code'
 
-import type { Item, Kind, Profile, Scope, View } from '../types'
-import { KINDS, KIND_LABELS, SCOPES, isBuiltinProfile, isShownOn } from './model'
+import type { Item, Kind, Profile, ProfileAction, Scope, View } from '../types'
+import { KINDS, KIND_LABELS, SCOPES, isFixedProfile, isShownOn } from './model'
 
 export type PaneElements = Pick<
   Elements['terminal'],
@@ -10,10 +10,9 @@ export type PaneElements = Pick<
 
 export type PaneActions = {
   onToggle: (id: string) => void
-  onProfile: (name: string) => void
+  onAction: (name: string, action: ProfileAction) => void
   onCreate: (name: string) => void
   onRename: (name: string) => void
-  onDelete: () => void
   onRestore: () => void
   onRefresh: () => void
   onView: (patch: Partial<View>) => void
@@ -24,6 +23,7 @@ export type PaneModel = {
   profiles: readonly Profile[]
   profile: Profile
   view: View
+  focused: string
   columns: number
   rows: number
   isDocked: boolean
@@ -47,6 +47,12 @@ const UNCHECKED = '☐'
 const OPEN_MARK = '▾'
 const CLOSED_MARK = '▸'
 const KINDS_WITHOUT_SECTION: readonly Kind[] = ['instruction']
+const PROFILE_KEY_PREFIX = 'profile:'
+const MENU_VALUE = 'menu'
+const MENU_MARK = '▾'
+const APPLIED_COLOR = 'success'
+const PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate', 'rename', 'delete']
+const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate']
 
 const clipEnd = (text: string, width: number) =>
   text.length > width ? `${text.slice(0, Math.max(1, width - 1))}…` : text
@@ -56,6 +62,12 @@ const clipStart = (text: string, width: number) =>
 
 export const visibleItems = (items: readonly Item[], view: View) =>
   items.filter(item => view.scope === ALL || item.scope === view.scope)
+
+export const actionsOf = (name: string) =>
+  isFixedProfile(name) ? FIXED_PROFILE_ACTIONS : PROFILE_ACTIONS
+
+export const profileOfKey = (key: string | undefined) =>
+  key?.startsWith(PROFILE_KEY_PREFIX) ? key.slice(PROFILE_KEY_PREFIX.length) : ''
 
 export const pageSize = (rows: number) => Math.max(MIN_LIST_ROWS, rows - CHROME_ROWS)
 
@@ -102,7 +114,7 @@ export const drawBand = (
 
 export const drawPane = (
   { Box, Text, Button, Input, Select }: PaneElements,
-  { items, profiles, profile, view, columns, rows, isDocked }: PaneModel,
+  { items, profiles, profile, view, focused, columns, rows, isDocked }: PaneModel,
   actions: PaneActions,
 ) => {
   const lines = linesOf(items, profile, view)
@@ -112,7 +124,10 @@ export const drawPane = (
   const room = Math.max(20, columns - FRAME_COLUMNS - INDENT_COLUMNS - CHECKBOX_COLUMNS - SCOPE_COLUMNS - 2)
   const nameWidth = Math.floor(room * NAME_SHARE)
   const offCount = items.filter(item => !isShownOn(profile, item)).length
-  const isCustom = !isBuiltinProfile(profile.name)
+  const isRenaming =
+    view.edit === 'rename' &&
+    !isFixedProfile(view.target) &&
+    profiles.some(one => one.name === view.target)
   const scopeOptions = [
     { value: ALL, label: 'All scopes' },
     ...SCOPES.filter(scope => items.some(item => item.scope === scope)).map(scope => ({
@@ -158,6 +173,33 @@ export const drawPane = (
           {item.scope.padEnd(SCOPE_COLUMNS - 2)}
         </Text>
         <Text dimColor>{clipStart(origin, room - nameWidth)}</Text>
+      </Box>
+    )
+  }
+
+  const drawProfile = (one: Profile) => {
+    const isApplied = one.name === profile.name
+    const offered = actionsOf(one.name)
+
+    return (
+      <Box flexDirection="row" gap={1}>
+        <Box flexDirection="row">
+          {isApplied && <Text color={APPLIED_COLOR}>[</Text>}
+          <Text dimColor={one.name !== focused}>{one.name}</Text>
+          {isApplied && <Text color={APPLIED_COLOR}>]</Text>}
+        </Box>
+        <Select
+          key={`${PROFILE_KEY_PREFIX}${one.name}`}
+          value={MENU_VALUE}
+          options={[
+            { value: MENU_VALUE, label: MENU_MARK },
+            ...offered.map(action => ({ value: action })),
+          ]}
+          onSelect={value => {
+            const action = offered.find(candidate => candidate === value)
+            if (action !== undefined) actions.onAction(one.name, action)
+          }}
+        />
       </Box>
     )
   }
@@ -220,7 +262,7 @@ export const drawPane = (
         <Box flexDirection="row" gap={1}>
           <Input
             key="new-profile-name"
-            label="New profile"
+            label={`Duplicate "${view.target}"`}
             placeholder="name"
             submitLabel="create"
             autoFocus
@@ -229,13 +271,13 @@ export const drawPane = (
           <Button key="cancel-edit" plain dimColor label="Cancel" onPress={closeEdit} />
         </Box>
       )}
-      {view.edit === 'rename' && isCustom && (
+      {isRenaming && (
         <Box flexDirection="row" gap={1}>
           <Input
             key="rename-profile-name"
-            label={`Rename "${profile.name}"`}
+            label={`Rename "${view.target}"`}
             placeholder="name"
-            value={profile.name}
+            value={view.target}
             submitLabel="rename"
             autoFocus
             onSubmit={actions.onRename}
@@ -243,45 +285,14 @@ export const drawPane = (
           <Button key="cancel-edit" plain dimColor label="Cancel" onPress={closeEdit} />
         </Box>
       )}
-      <Box key="profile-tabs" flexDirection="row" justifyContent="space-between" {...FRAME}>
-        <Box flexDirection="row" gap={2} flexWrap="wrap">
-          {profiles.map(one =>
-            one.name === profile.name ? (
-              <Button
-                key={`profile:${one.name}`}
-                variant="primary"
-                label={one.name}
-                onPress={() => actions.onProfile(one.name)}
-              />
-            ) : (
-              <Button
-                key={`profile:${one.name}`}
-                plain
-                dimColor
-                label={one.name}
-                onPress={() => actions.onProfile(one.name)}
-              />
-            ),
-          )}
-          <Button
-            key="new-profile"
-            plain
-            label="+"
-            onPress={() => actions.onView({ edit: 'new' })}
-          />
-        </Box>
-        {isCustom && (
-          <Box flexDirection="row" gap={2}>
-            <Button
-              key="rename-profile"
-              plain
-              dimColor
-              label="Rename"
-              onPress={() => actions.onView({ edit: 'rename' })}
-            />
-            <Button key="delete-profile" plain dimColor label="Delete" onPress={actions.onDelete} />
-          </Box>
-        )}
+      <Box key="profile-tabs" flexDirection="row" gap={2} flexWrap="wrap" {...FRAME}>
+        {profiles.map(drawProfile)}
+        <Button
+          key="new-profile"
+          plain
+          label="+"
+          onPress={() => actions.onView({ edit: 'new', target: profile.name })}
+        />
       </Box>
     </Box>
   )

@@ -59,12 +59,16 @@ export type Profile = {
 
 export type ProfileEdit = 'none' | 'new' | 'rename'
 
+export type ProfileAction = 'apply' | 'duplicate' | 'rename' | 'delete'
+
 export type View = {
   open: Kind[]
   scope: Scope | 'all'
   page: number
   notice: string
   edit: ProfileEdit
+  target: string
+  focused: string
 }
 
 export type Stash = Record<string, Item>

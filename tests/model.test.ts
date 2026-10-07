@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
-  BUILTIN_PROFILES,
   EMPTY_LEDGER,
+  INITIAL_PROFILES,
   desiredState,
   findProfile,
   isEnabled,
@@ -12,14 +12,14 @@ import {
   renameProfile,
   restoredProfiles,
   upsertProfile,
-  withBuiltins,
+  withVanilla,
   withoutLegacyNames,
   withOverride,
 } from '../hooks/model'
 import type { Item, Profile } from '../types'
 
-const DEFAULT = BUILTIN_PROFILES[0]!
-const VANILLA = BUILTIN_PROFILES[1]!
+const DEFAULT = INITIAL_PROFILES[0]!
+const VANILLA = INITIAL_PROFILES[1]!
 const SKILL: Item = {
   id: 'skill:ecc:plan',
   kind: 'skill',
@@ -118,7 +118,7 @@ describe('profiles', () => {
 
   test('upsertProfile replaces a profile of the same name', () => {
     const custom: Profile = { name: 'ecc-react', base: 'off', overrides: {} }
-    const added = upsertProfile(BUILTIN_PROFILES, custom)
+    const added = upsertProfile(INITIAL_PROFILES, custom)
     const replaced = upsertProfile(added, { ...custom, base: 'on' })
 
     expect(added.length).toBe(3)
@@ -127,23 +127,29 @@ describe('profiles', () => {
   })
 
   test('findProfile falls back to default for an unknown name', () => {
-    expect(findProfile(BUILTIN_PROFILES, 'missing').name).toBe('default')
+    expect(findProfile(INITIAL_PROFILES, 'missing').name).toBe('default')
   })
 
   test('removeProfile drops only the named profile', () => {
     const custom: Profile = { name: 'ecc-react', base: 'off', overrides: {} }
 
-    expect(removeProfile([...BUILTIN_PROFILES, custom], 'ecc-react').length).toBe(2)
+    expect(removeProfile([...INITIAL_PROFILES, custom], 'ecc-react').length).toBe(2)
   })
 
-  test('withBuiltins always carries default and vanilla first', () => {
+  test('withVanilla adds vanilla and never brings a deleted default back', () => {
     const custom: Profile = { name: 'ecc-react', base: 'off', overrides: {} }
 
-    expect(withBuiltins([custom]).map(profile => profile.name)).toEqual([
-      'default',
-      'vanilla',
-      'ecc-react',
-    ])
+    expect(withVanilla([custom])).toEqual([custom, VANILLA])
+  })
+
+  test('withVanilla undoes any change stored on vanilla and keeps its place', () => {
+    const changed = withOverride(VANILLA, SKILL.id, true)
+
+    expect(withVanilla([changed, DEFAULT])).toEqual([VANILLA, DEFAULT])
+  })
+
+  test('findProfile falls back to vanilla once no other profile is left', () => {
+    expect(findProfile([VANILLA], 'missing')).toEqual(VANILLA)
   })
 
   test('renameProfile renames only the named profile and keeps its place', () => {
@@ -174,22 +180,37 @@ describe('profiles', () => {
 
     const restored = restoredProfiles([legacy], 'pristine')
 
-    expect(restored).toEqual({
-      profiles: [DEFAULT, { ...legacy, name: 'vanilla' }],
-      active: 'vanilla',
+    expect(restored).toEqual({ profiles: [VANILLA], active: 'vanilla' })
+  })
+
+  test('restoredProfiles starts a fresh install with default and vanilla only', () => {
+    expect(restoredProfiles(undefined, undefined)).toEqual({
+      profiles: [DEFAULT, VANILLA],
+      active: 'default',
     })
   })
 
-  test('restoredProfiles falls back to default when the stored selection is gone', () => {
-    expect(restoredProfiles([], 'deleted').active).toBe('default')
-    expect(restoredProfiles([], undefined).active).toBe('default')
+  test('restoredProfiles keeps a renamed default and does not add another', () => {
+    const renamed: Profile = { ...DEFAULT, name: 'mine' }
+
+    expect(restoredProfiles([renamed, VANILLA], 'mine')).toEqual({
+      profiles: [renamed, VANILLA],
+      active: 'mine',
+    })
+  })
+
+  test('restoredProfiles falls back to another profile when the stored selection is gone', () => {
+    const custom: Profile = { name: 'ecc-react', base: 'on', overrides: {} }
+
+    expect(restoredProfiles([VANILLA, custom], 'deleted').active).toBe('ecc-react')
+    expect(restoredProfiles([], undefined).active).toBe('vanilla')
   })
 
   test('nameProblem asks for a name, a valid one, and one not taken', () => {
-    expect(nameProblem(BUILTIN_PROFILES, '')).toBe('A profile name is required.')
-    expect(nameProblem(BUILTIN_PROFILES, '../etc')).toContain('A profile name is 1-40')
-    expect(nameProblem(BUILTIN_PROFILES, 'vanilla')).toBe('Profile "vanilla" already exists.')
-    expect(nameProblem(BUILTIN_PROFILES, 'ecc-react')).toBeUndefined()
+    expect(nameProblem(INITIAL_PROFILES, '')).toBe('A profile name is required.')
+    expect(nameProblem(INITIAL_PROFILES, '../etc')).toContain('A profile name is 1-40')
+    expect(nameProblem(INITIAL_PROFILES, 'vanilla')).toBe('Profile "vanilla" already exists.')
+    expect(nameProblem(INITIAL_PROFILES, 'ecc-react')).toBeUndefined()
   })
 
   test('rejects profile names with spaces or path characters', () => {

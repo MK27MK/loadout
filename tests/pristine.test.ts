@@ -49,6 +49,7 @@ type World = {
   files?: Readonly<Record<string, string>>
   links?: readonly string[]
   policy?: Readonly<Record<string, unknown>>
+  firstName?: string
 }
 
 const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {}) => {
@@ -60,6 +61,7 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
     ...Object.entries(world.files ?? {}),
   ])
   const place = { root: ROOT }
+  const asked: string[] = []
   mock.store(on)
   mock.env(on, { HOME })
   on('session.root', () => ({ value: place.root }))
@@ -96,7 +98,18 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
     value: [{ name: 'mcp__github__list', description: 'List', mcp: true }],
   }))
   on('command.run', ($, e) => ({ text: `ran ${e.command}` }))
-  on('tool.call', () => ({ result: { ok: true } }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('command.register', () => ({ value: undefined }) as never)
+  on('ui.focus', () => ({}))
+  on('tool.call', ($, e) => {
+    if (String(e.tool) !== 'AskUserQuestion') return { result: { ok: true } }
+    const { questions } = e as unknown as { questions: { question: string }[] }
+    const question = questions[0]?.question ?? ''
+    asked.push(question)
+    if (world.firstName === undefined) throw new Error('dismissed')
+
+    return { result: { questions, answers: { [question]: world.firstName } } }
+  })
   on('classic.Stop', () => ({ block: 'a plugin hook blocked the stop' }))
   on('prompt.context', ($, e) => ({
     blocks: e.blocks,
@@ -104,6 +117,7 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
   }))
 
   return {
+    asked,
     userSettings: () => JSON.parse(disk.get(USER_SETTINGS_PATH) ?? '{}'),
     userSettingsText: () => disk.get(USER_SETTINGS_PATH),
     json: (path: string) => JSON.parse(disk.get(path) ?? 'null'),
@@ -136,6 +150,16 @@ const mountBand = ($: Engine, surface: 'terminal' | 'desktop') =>
     props: BAND,
     viewport: VIEWPORT,
   })
+
+const startSession = ($: Engine) =>
+  $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+
+const optionsOf = async (ui: Awaited<ReturnType<typeof mountPane>>, key: string) => {
+  const select = await ui.find({ key })
+  const options = (select?.props.options ?? []) as { value: string }[]
+
+  return options.map(option => option.value)
+}
 
 const mountPaneWithOpen = async ($: Engine, ...kinds: string[]) => {
   const ui = await mountPane($)
@@ -500,7 +524,7 @@ test('switches profile from the tab bar', async ($, on) => {
   await pristine($, 'status')
   const ui = await mountPane($)
 
-  await ui.press({ key: 'profile:vanilla' })
+  await ui.select({ key: 'profile:vanilla', value: 'apply' })
   const listed = await pristine($, 'list')
 
   expect(listed.text).toContain('* vanilla')
@@ -531,7 +555,7 @@ test('renames the active profile from the pane and keeps it active', async ($, o
   const ui = await mountPaneWithOpen($, 'skill')
   await ui.press({ key: 'toggle:skill:ecc:plan' })
 
-  await ui.press({ key: 'rename-profile' })
+  await ui.select({ key: 'profile:temp', value: 'rename' })
   await ui.input({ key: 'rename-profile-name', text: 'ecc-react' })
   const listed = await pristine($, 'list')
 
@@ -542,13 +566,119 @@ test('renames the active profile from the pane and keeps it active', async ($, o
   await ui.unmount()
 })
 
-test('offers no rename or delete for a built-in profile', async ($, on) => {
+test('offers every action on default and no rename or delete on vanilla', async ($, on) => {
   harness(on)
   await pristine($, 'status')
   const ui = await mountPane($)
 
-  expect(await ui.find({ key: 'rename-profile' })).toBeUndefined()
-  expect(await ui.find({ key: 'delete-profile' })).toBeUndefined()
+  expect(await optionsOf(ui, 'profile:default')).toEqual([
+    'menu',
+    'apply',
+    'duplicate',
+    'rename',
+    'delete',
+  ])
+  expect(await optionsOf(ui, 'profile:vanilla')).toEqual(['menu', 'apply', 'duplicate'])
+  await ui.unmount()
+})
+
+test('duplicates a profile that is not applied from its dropdown', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+
+  await ui.select({ key: 'profile:vanilla', value: 'duplicate' })
+  const field = await ui.find({ key: 'new-profile-name' })
+  await ui.input({ key: 'new-profile-name', text: 'bare' })
+  const listed = await pristine($, 'list')
+
+  expect(field?.props.label).toBe('Duplicate "vanilla"')
+  expect(listed.text).toContain('* bare (base off, 0 overrides)')
+  expect(listed.text).toContain('  vanilla (base off, 0 overrides)')
+  await ui.unmount()
+})
+
+test('renames default like any other profile and keeps it applied', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+
+  await ui.select({ key: 'profile:default', value: 'rename' })
+  await ui.input({ key: 'rename-profile-name', text: 'mine' })
+  const listed = await pristine($, 'list')
+
+  expect(listed.text).toContain('* mine (base on, 0 overrides)')
+  expect(listed.text).not.toContain('default')
+  await ui.unmount()
+})
+
+test('deletes default from its dropdown and applies the next profile left', async ($, on) => {
+  const files = harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+
+  await ui.select({ key: 'profile:default', value: 'delete' })
+  const listed = await pristine($, 'list')
+
+  expect(listed.text).toBe('* vanilla (base off, 0 overrides)')
+  expect(files.userSettings().enabledPlugins).toEqual({ 'ecc@ecc': false })
+  expect(await ui.find({ key: 'profile:default' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('deletes a profile that is not applied and leaves the applied one alone', async ($, on) => {
+  harness(on)
+  await pristine($, 'new temp off')
+  await pristine($, 'use default')
+  const ui = await mountPane($)
+
+  await ui.select({ key: 'profile:temp', value: 'delete' })
+  const listed = await pristine($, 'list')
+
+  expect(listed.text).toContain('* default')
+  expect(listed.text).not.toContain('temp')
+  await ui.unmount()
+})
+
+test('never changes vanilla, whatever is toggled under it', async ($, on) => {
+  harness(on)
+  await pristine($, 'use vanilla')
+  const ui = await mountPaneWithOpen($, 'skill')
+
+  await ui.press({ key: 'toggle:skill:ecc:plan' })
+  const ran = await $.command.run({ ...TYPED_BY_PERSON, command: 'ecc:plan', args: '' })
+  const listed = await pristine($, 'list')
+
+  expect(ran.text).toContain('/ecc:plan is turned off')
+  expect(listed.text).toContain('* vanilla (base off, 0 overrides)')
+  expect(await ui.find({ type: 'Text', text: /cannot be changed/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('brackets the applied profile in green and lights the focused one', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+  const nameOf = async (name: string) =>
+    (await ui.findAll({ type: 'Text', text: name })).at(-1)?.props.dimColor
+
+  const brackets = await ui.findAll({ type: 'Text', text: /^[[\]]$/ })
+  const atRest = [await nameOf('default'), await nameOf('vanilla')]
+  await $.ui.focus({
+    component: 'Pane',
+    requestId: 'pristine',
+    plugin: 'pristine',
+    element: 'profile:vanilla',
+    origin: { kind: 'person' },
+  })
+  const focused = [await nameOf('default'), await nameOf('vanilla')]
+  await ui.select({ key: 'profile:vanilla', value: 'apply' })
+  const applied = (await pristine($, 'list')).text
+
+  expect(brackets.map(one => one.props.color)).toEqual(['success', 'success'])
+  expect(atRest).toEqual([true, true])
+  expect(focused).toEqual([true, false])
+  expect(applied).toContain('* vanilla')
   await ui.unmount()
 })
 
@@ -594,6 +724,48 @@ test('lets only the person rename a profile', async ($, on) => {
 
   expect(refused.text).toContain('Only the person')
   expect((await pristine($, 'list')).text).toContain('* temp')
+})
+
+test('a fresh install has default and vanilla and asks once what to call default', async ($, on) => {
+  const files = harness(on, USER_SETTINGS, { firstName: 'mine' })
+  const renamed = new Promise<void>(resolve => {
+    on('ui.toast', () => {
+      resolve()
+
+      return { value: undefined } as never
+    })
+  })
+
+  await startSession($)
+  await renamed
+  const listed = await pristine($, 'list')
+  await startSession($)
+
+  expect(listed.text).toBe(
+    '* mine (base on, 0 overrides)\n  vanilla (base off, 0 overrides)',
+  )
+  expect(files.asked.length).toBe(1)
+  expect(files.asked[0]).toContain('call the profile')
+})
+
+test('keeps the name default when the person leaves the question unanswered', async ($, on) => {
+  const files = harness(on)
+
+  await startSession($)
+  const listed = await pristine($, 'list')
+
+  expect(files.asked.length).toBe(1)
+  expect(listed.text).toBe(
+    '* default (base on, 0 overrides)\n  vanilla (base off, 0 overrides)',
+  )
+})
+
+test('keeps the name default when the answer is not a valid profile name', async ($, on) => {
+  harness(on, USER_SETTINGS, { firstName: '../etc' })
+
+  await startSession($)
+
+  expect((await pristine($, 'list')).text).toContain('* default')
 })
 
 test('opens the pane from the arrow above the prompt on terminal and desktop', async ($, on) => {
@@ -642,7 +814,7 @@ test('asks for a name before it creates or renames a profile', async ($, on) => 
   const field = await ui.find({ key: 'new-profile-name' })
   await ui.input({ key: 'new-profile-name', text: '  ' })
   const stillAsking = await ui.find({ key: 'new-profile-name' })
-  await ui.press({ key: 'rename-profile' })
+  await ui.select({ key: 'profile:temp', value: 'rename' })
   await ui.input({ key: 'rename-profile-name', text: '' })
 
   expect(field?.props.placeholder).toBe('name')

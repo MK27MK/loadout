@@ -3,10 +3,17 @@ import type { Item, Kind, Ledger, Profile, Scope } from '../types'
 export const PLUGIN = 'pristine'
 export const DEFAULT_PROFILE_NAME = 'default'
 export const VANILLA_PROFILE_NAME = 'vanilla'
-export const BUILTIN_PROFILES: readonly Profile[] = [
-  { name: DEFAULT_PROFILE_NAME, base: 'on', overrides: {} },
-  { name: VANILLA_PROFILE_NAME, base: 'off', overrides: {} },
-]
+export const DEFAULT_PROFILE: Profile = {
+  name: DEFAULT_PROFILE_NAME,
+  base: 'on',
+  overrides: {},
+}
+export const VANILLA_PROFILE: Profile = {
+  name: VANILLA_PROFILE_NAME,
+  base: 'off',
+  overrides: {},
+}
+export const INITIAL_PROFILES: readonly Profile[] = [DEFAULT_PROFILE, VANILLA_PROFILE]
 
 const LEGACY_VANILLA_PROFILE_NAME = 'pristine'
 
@@ -53,11 +60,13 @@ export const nameProblem = (profiles: readonly Profile[], name: string) => {
   return undefined
 }
 
-export const isBuiltinProfile = (name: string) =>
-  BUILTIN_PROFILES.some(profile => profile.name === name)
+export const isFixedProfile = (name: string) => name === VANILLA_PROFILE_NAME
+
+export const fallbackProfile = (profiles: readonly Profile[]) =>
+  profiles.find(profile => !isFixedProfile(profile.name)) ?? VANILLA_PROFILE
 
 export const findProfile = (profiles: readonly Profile[], name: string) =>
-  profiles.find(profile => profile.name === name) ?? BUILTIN_PROFILES[0]!
+  profiles.find(profile => profile.name === name) ?? fallbackProfile(profiles)
 
 export const isEnabled = (profile: Profile, item: Item) => {
   if (item.isLocked) return true
@@ -123,17 +132,21 @@ export const withoutLegacyNames = (profiles: readonly Profile[]): Profile[] =>
     ? [...profiles]
     : renameProfile(profiles, LEGACY_VANILLA_PROFILE_NAME, VANILLA_PROFILE_NAME)
 
-export const withBuiltins = (profiles: readonly Profile[]): Profile[] => [
-  ...BUILTIN_PROFILES.map(
-    builtin => profiles.find(one => one.name === builtin.name) ?? builtin,
-  ),
-  ...profiles.filter(profile => !isBuiltinProfile(profile.name)),
-]
+export const withVanilla = (profiles: readonly Profile[]): Profile[] =>
+  profiles.some(profile => isFixedProfile(profile.name))
+    ? profiles.map(profile => (isFixedProfile(profile.name) ? VANILLA_PROFILE : profile))
+    : [...profiles, VANILLA_PROFILE]
 
-export const restoredProfiles = (stored: readonly Profile[], wanted: unknown) => {
-  const profiles = withBuiltins(withoutLegacyNames(stored))
+export const restoredProfiles = (
+  stored: readonly Profile[] | undefined,
+  wanted: unknown,
+) => {
+  const profiles = withVanilla(withoutLegacyNames(stored ?? INITIAL_PROFILES))
   const isNamed = (name: unknown) => profiles.some(profile => profile.name === name)
   const carried = isNamed(wanted) ? String(wanted) : currentNameOf(String(wanted))
 
-  return { profiles, active: isNamed(carried) ? carried : DEFAULT_PROFILE_NAME }
+  return {
+    profiles,
+    active: isNamed(carried) ? carried : fallbackProfile(profiles).name,
+  }
 }
