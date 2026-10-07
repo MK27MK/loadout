@@ -37,6 +37,7 @@ import {
   findProfile,
   isEnabled,
   isFixedProfile,
+  isOnIn,
   isShownOn,
   isValidProfileName,
   nameProblem,
@@ -47,7 +48,7 @@ import {
   withOverride,
 } from './model'
 import { isObject, isSoundStashedItem } from './settingsEdit'
-import { drawBand, drawPane, profileOfKey } from './view'
+import { drawBand, drawPane } from './view'
 
 const PANE = 'pristine'
 const PANE_ROWS = 24
@@ -75,9 +76,9 @@ const INITIAL_VIEW: View = {
   notice: '',
   edit: 'none',
   target: '',
-  focused: '',
+  viewed: '',
 }
-const VIEW_SHAPE = 'sections-v2'
+const VIEW_SHAPE = 'sections-v3'
 const FIRST_NAME_QUESTION =
   'What should pristine call the profile that carries your current setup?'
 const FIRST_NAME_OPTIONS = {
@@ -158,6 +159,15 @@ const loadLedger = async ($: EngineInterface): Promise<Ledger> => {
 const activeProfile = async ($: EngineInterface) =>
   findProfile(await read($, profilesAtom), await read($, activeAtom))
 
+const shownProfile = async ($: EngineInterface) => {
+  const { viewed } = await read($, viewAtom)
+
+  return (
+    (await read($, profilesAtom)).find(profile => profile.name === viewed) ??
+    activeProfile($)
+  )
+}
+
 const setView = ($: EngineInterface, patch: Partial<View>) =>
   update($, viewAtom, view => ({ ...view, ...patch }))
 
@@ -186,11 +196,11 @@ const invalidateGates = ($: EngineInterface) => {
   $.ui.invalidate('command.describe')
 }
 
-const forgetProfile = ($: EngineInterface, name: string) =>
+const forgetProfile = ($: EngineInterface, name: string, renamedTo = '') =>
   update($, viewAtom, view => ({
     ...view,
     ...(view.target === name ? { edit: 'none' as const, target: '' } : {}),
-    ...(view.focused === name ? { focused: '' } : {}),
+    ...(view.viewed === name ? { viewed: renamedTo } : {}),
   }))
 
 const saveProfiles = async ($: EngineInterface, profiles: Profile[]) => {
@@ -323,12 +333,13 @@ const toggle = async ($: EngineInterface, id: string) => {
   }
   if (item.isLocked)
     return say($, `${item.name} is locked by the ${item.scope} scope and stays on.`)
-  const profile = await activeProfile($)
+  const profile = await shownProfile($)
   if (isFixedProfile(profile.name))
     return say($, `"${profile.name}" is built in and cannot be changed; duplicate it first.`)
-  const isOn = !isShownOn(profile, item)
+  const isApplied = profile.name === (await activeProfile($)).name
+  const isOn = !isOnIn(profile, item, await loadLedger($), isApplied)
   try {
-    await setPersisted($, item, isOn)
+    if (isApplied) await setPersisted($, item, isOn)
   } catch (error) {
     await refresh($)
 
@@ -340,7 +351,7 @@ const toggle = async ($: EngineInterface, id: string) => {
   )
   await refresh($)
   invalidateGates($)
-  const hint = item.kind === 'plugin' ? ' Run /reload-plugins to apply.' : ''
+  const hint = isApplied && item.kind === 'plugin' ? ' Run /reload-plugins to apply.' : ''
 
   return say(
     $,
@@ -376,6 +387,7 @@ const activate = async ($: EngineInterface, profile: Profile) => {
   const outcome = await reconcile($, profile)
   await update($, activeAtom, () => profile.name)
   await $.store.set(ACTIVE_KEY, profile.name)
+  await setView($, { viewed: profile.name })
   invalidateGates($)
 
   return outcome
@@ -428,7 +440,7 @@ const renameTo = async ($: EngineInterface, from: string, to: string) => {
   const problem = nameProblem(profiles, to)
   if (problem !== undefined) return say($, problem)
   await saveProfiles($, renameProfile(profiles, from, to))
-  await forgetProfile($, from)
+  await forgetProfile($, from, to)
   if ((await read($, activeAtom)) === from) {
     await update($, activeAtom, () => to)
     await $.store.set(ACTIVE_KEY, to)
@@ -804,18 +816,6 @@ export const register: Register = on => {
     (await isHookEventMuted($, 'WorktreeRemove')) ? {} : next(e),
   ).catch(($, e, next) => next(e))
 
-  on('ui.focus', { requestId: PANE }, async ($, e, next) => {
-    const answered = await next(e)
-    try {
-      const focused = profileOfKey(e.element)
-      if ((await read($, viewAtom)).focused !== focused) await setView($, { focused })
-    } catch (error) {
-      $.ui.log(`pristine could not follow the focus: ${messageOf(error)}`, { to: 'debug' })
-    }
-
-    return answered
-  })
-
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
@@ -832,15 +832,20 @@ export const register: Register = on => {
     const report = (error: unknown) => void say($, `pristine failed: ${messageOf(error)}`)
 
     const view = await read($, viewAtom)
+    const applied = (await activeProfile($)).name
+    const profile = await shownProfile($)
+    const isApplied = profile.name === applied
+    const ledger = isApplied ? EMPTY_LEDGER : await loadLedger($)
 
     return drawPane(
       $.ui.resolve(e),
       {
         items: await read($, itemsAtom),
         profiles: await read($, profilesAtom),
-        profile: await activeProfile($),
+        profile,
+        applied,
+        isOn: item => isOnIn(profile, item, ledger, isApplied),
         view,
-        focused: e.props.isFocused ? view.focused : '',
         columns: e.props.bodyColumns ?? FALLBACK_COLUMNS,
         rows: e.props.scroll?.bodyRows ?? FALLBACK_ROWS,
         isDocked: e.props.placement === 'dock',

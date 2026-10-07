@@ -137,13 +137,17 @@ const harness = (on: On, userSettings: unknown = USER_SETTINGS, world: World = {
 const pristine = ($: Engine, args: string) =>
   $.command.run({ ...TYPED_BY_PERSON, command: 'pristine', args })
 
-const mountPane = ($: Engine, surface: 'terminal' | 'desktop' = 'terminal') =>
+const mountPane = (
+  $: Engine,
+  surface: 'terminal' | 'desktop' = 'terminal',
+  props: Omit<typeof PANE, 'isFocused'> & { isFocused: boolean } = PANE,
+) =>
   $.ui.mount({
     plugin: 'pristine',
     surface,
     component: 'Pane',
     requestId: 'pristine',
-    props: PANE,
+    props,
     viewport: VIEWPORT,
   })
 
@@ -162,6 +166,16 @@ const startSession = ($: Engine) =>
 type MountedPane = Awaited<ReturnType<typeof mountPane>>
 
 const PROFILE_ACTIONS = ['apply', 'duplicate', 'rename', 'delete']
+const SKILL_TOGGLE = 'toggle:skill:ecc:plan'
+const PLUGIN_TOGGLE = `toggle:plugin:${USER_SETTINGS_PATH}:enabledPlugins.ecc@ecc:`
+
+const isDim = async (ui: MountedPane, name: string) =>
+  (await ui.find({ key: `profile:${name}` }))?.props.dimColor
+
+const checkboxes = async (ui: MountedPane) => [
+  (await ui.find({ key: SKILL_TOGGLE }))?.text,
+  (await ui.find({ key: PLUGIN_TOGGLE }))?.text,
+]
 
 const openMenu = async (ui: MountedPane, name: string) => {
   await ui.press({ key: `profile:${name}` })
@@ -715,63 +729,182 @@ test('never changes vanilla, whatever is toggled under it', async ($, on) => {
   await ui.unmount()
 })
 
-test('brackets the applied profile in green and lights the focused one', async ($, on) => {
+test('brackets the applied profile in green and lights the one whose harness is shown', async ($, on) => {
   harness(on)
   await pristine($, 'status')
   const ui = await mountPane($)
-  const nameOf = async (name: string) =>
-    (await ui.find({ key: `profile:${name}` }))?.props.dimColor
 
   const brackets = await ui.findAll({ type: 'Text', text: /^[[\]]$/ })
-  const atRest = [await nameOf('default'), await nameOf('vanilla')]
+  const atRest = [await isDim(ui, 'default'), await isDim(ui, 'vanilla')]
+  await ui.press({ key: 'profile:vanilla' })
+  const clicked = [await isDim(ui, 'default'), await isDim(ui, 'vanilla')]
+  const applied = (await pristine($, 'list')).text
+
+  expect(brackets.map(one => one.props.color)).toEqual(['success', 'success'])
+  expect(atRest).toEqual([false, true])
+  expect(clicked).toEqual([true, false])
+  expect(applied).toContain('* default')
+  await ui.unmount()
+})
+
+test('keeps the clicked profile lit once the focus moves on or leaves the pane', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+
+  await ui.press({ key: 'profile:vanilla' })
   await $.ui.focus({
     component: 'Pane',
     requestId: 'pristine',
     plugin: 'pristine',
-    element: 'profile:vanilla',
+    element: 'refresh',
     origin: { kind: 'person' },
   })
-  const focused = [await nameOf('default'), await nameOf('vanilla')]
-  await act(ui, 'vanilla', 'apply')
-  const applied = (await pristine($, 'list')).text
+  const afterFocusMoved = [await isDim(ui, 'default'), await isDim(ui, 'vanilla')]
+  await ui.unmount()
+  const unfocused = await mountPane($, 'terminal', { ...PANE, isFocused: false })
+  const afterFocusLeft = [await isDim(unfocused, 'default'), await isDim(unfocused, 'vanilla')]
 
-  expect(brackets.map(one => one.props.color)).toEqual(['success', 'success'])
-  expect(atRest).toEqual([true, true])
-  expect(focused).toEqual([true, false])
-  expect(applied).toContain('* vanilla')
+  expect(afterFocusMoved).toEqual([true, false])
+  expect(afterFocusLeft).toEqual([true, false])
+  await unfocused.unmount()
+})
+
+test('shows the checkboxes of the profile that is clicked, not those of the applied one', async ($, on) => {
+  const files = harness(on)
+  await pristine($, 'status')
+  const ui = await mountPaneWithOpen($, 'skill', 'plugin')
+
+  const underDefault = await checkboxes(ui)
+  await ui.press({ key: 'profile:vanilla' })
+  const underVanilla = await checkboxes(ui)
+  const heading = await ui.find({ type: 'Text', text: /vanilla · base off/ })
+  await ui.press({ key: 'profile:default' })
+
+  expect(underDefault).toEqual(['☑', '☑'])
+  expect(underVanilla).toEqual(['☐', '☐'])
+  expect(heading).toBeDefined()
+  expect(await checkboxes(ui)).toEqual(['☑', '☑'])
+  expect(files.userSettings()).toEqual(USER_SETTINGS)
+  expect((await pristine($, 'list')).text).toContain('* default')
   await ui.unmount()
 })
 
-test('focuses a profile when its name is clicked and draws one arrow beside it alone', async ($, on) => {
+test('a toggle changes the profile that is shown and leaves the applied one alone', async ($, on) => {
+  const files = harness(on)
+  await pristine($, 'new temp on')
+  await pristine($, 'use default')
+  const ui = await mountPaneWithOpen($, 'skill', 'plugin')
+
+  await ui.press({ key: 'profile:temp' })
+  await ui.press({ key: SKILL_TOGGLE })
+  await ui.press({ key: PLUGIN_TOGGLE })
+  const underTemp = await checkboxes(ui)
+  const ran = await $.command.run({ ...TYPED_BY_PERSON, command: 'ecc:plan', args: '' })
+  const listed = (await pristine($, 'list')).text
+  const whileNotApplied = files.userSettings()
+  await ui.press({ key: 'profile:default' })
+  const underDefault = await checkboxes(ui)
+  await act(ui, 'temp', 'apply')
+
+  expect(underTemp).toEqual(['☐', '☐'])
+  expect(underDefault).toEqual(['☑', '☑'])
+  expect(ran.text).toBe('ran ecc:plan')
+  expect(listed).toContain('* default (base on, 0 overrides)')
+  expect(listed).toContain('  temp (base on, 2 overrides)')
+  expect(whileNotApplied).toEqual(USER_SETTINGS)
+  expect(files.userSettings().enabledPlugins).toEqual({ 'ecc@ecc': false })
+  expect(await checkboxes(ui)).toEqual(['☐', '☐'])
+  await ui.unmount()
+})
+
+test('shows the profile a command applies', async ($, on) => {
   harness(on)
   await pristine($, 'status')
   const ui = await mountPane($)
-  const arrowsAtRest = await ui.findAll({ type: 'Button', text: /^[▸◂▾]$/ })
 
   await ui.press({ key: 'profile:vanilla' })
-  const arrows = await ui.findAll({ type: 'Button', text: /^[▸◂▾]$/ })
+  await pristine($, 'new temp on')
 
-  expect(arrowsAtRest).toEqual([])
-  expect(arrows.map(one => one.text)).toEqual(['▸'])
-  expect(await ui.find({ key: 'menu:vanilla' })).toBeDefined()
-  expect((await ui.find({ key: 'profile:vanilla' }))?.props.dimColor).toBe(false)
-  expect((await ui.find({ key: 'profile:default' }))?.props.dimColor).toBe(true)
-  expect(await ui.findAll({ type: 'Select', text: /[▸◂▾]/ })).toEqual([])
+  expect([await isDim(ui, 'vanilla'), await isDim(ui, 'temp')]).toEqual([true, false])
   await ui.unmount()
 })
 
-test('opens the actions beside the arrow and folds them on a second press', async ($, on) => {
+test('keeps showing a profile under its new name once it is renamed', async ($, on) => {
+  harness(on)
+  await pristine($, 'new temp on')
+  await pristine($, 'use default')
+  const ui = await mountPane($)
+
+  await ui.press({ key: 'profile:temp' })
+  await pristine($, 'rename temp kept')
+
+  expect([await isDim(ui, 'default'), await isDim(ui, 'kept')]).toEqual([true, false])
+  await ui.unmount()
+})
+
+test('the plus tab duplicates the profile whose harness is shown', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+
+  await ui.press({ key: 'profile:vanilla' })
+  await ui.press({ key: 'new-profile' })
+  const field = await ui.find({ key: 'new-profile-name' })
+  await ui.input({ key: 'new-profile-name', text: 'bare' })
+
+  expect(field?.props.label).toBe('Duplicate "vanilla"')
+  expect((await pristine($, 'list')).text).toContain('* bare (base off, 0 overrides)')
+  await ui.unmount()
+})
+
+test('draws one arrow, beside the profile whose harness is shown', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+  const arrowsAtRest = await ui.findAll({ type: 'Button', text: /^[▸▾]$/ })
+  const menuAtRest = await ui.find({ key: 'menu:default' })
+
+  await ui.press({ key: 'profile:vanilla' })
+  const arrows = await ui.findAll({ type: 'Button', text: /^[▸▾]$/ })
+
+  expect(arrowsAtRest.map(one => one.text)).toEqual(['▸'])
+  expect(menuAtRest).toBeDefined()
+  expect(arrows.map(one => one.text)).toEqual(['▸'])
+  expect(await ui.find({ key: 'menu:vanilla' })).toBeDefined()
+  expect(await ui.find({ key: 'menu:default' })).toBeUndefined()
+  expect(await ui.findAll({ type: 'Select', text: /[▸▾]/ })).toEqual([])
+  await ui.unmount()
+})
+
+test('stacks the actions one under the other and folds them on a second press', async ($, on) => {
   harness(on)
   await pristine($, 'status')
   const ui = await mountPane($)
 
   await openMenu(ui, 'default')
-  const whenOpen = await ui.find({ key: 'action:apply' })
+  const menu = await ui.find({ key: 'profile-menu' })
+  const stacked = (menu?.children ?? []) as { props: { key?: string } }[]
   await ui.press({ key: 'menu:default' })
-  const whenFolded = await ui.find({ key: 'action:apply' })
 
-  expect(whenOpen).toBeDefined()
-  expect(whenFolded).toBeUndefined()
+  expect(menu?.props.flexDirection).toBe('column')
+  expect(stacked.map(one => one.props.key)).toEqual(PROFILE_ACTIONS.map(action => `action:${action}`))
+  expect(await ui.find({ key: 'action:apply' })).toBeUndefined()
+  expect(await ui.find({ key: 'profile-menu' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('keeps the profile tabs in the pane while the actions are open', async ($, on) => {
+  const permissions = Array.from({ length: 60 }, (unused, index) => `Read(file-${index})`)
+  harness(on, { permissions: { deny: permissions } })
+  await pristine($, 'status')
+  const ui = await mountPaneWithOpen($, 'permission')
+  const rowsOf = async () => (await ui.findAll({ type: 'Button', text: /^[☑☐]$/ })).length
+
+  const whenFolded = await rowsOf()
+  await openMenu(ui, 'default')
+
+  expect(whenFolded - (await rowsOf())).toBe(PROFILE_ACTIONS.length)
   await ui.unmount()
 })
 

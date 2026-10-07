@@ -95,6 +95,13 @@ export const desiredState = (profile: Profile, item: Item, ledger: Ledger) => {
 export const isShownOn = (profile: Profile, item: Item) =>
   item.entry === undefined ? isEnabled(profile, item) : item.isOn
 
+export const isOnIn = (
+  profile: Profile,
+  item: Item,
+  ledger: Ledger,
+  isApplied: boolean,
+) => (isApplied ? isShownOn(profile, item) : desiredState(profile, item, ledger))
+
 export const withOverride = (
   profile: Profile,
   id: string,

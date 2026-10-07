@@ -1,7 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import type { Item, Kind, Profile, ProfileAction, Scope, View } from '../types'
-import { KINDS, KIND_LABELS, SCOPES, isFixedProfile, isShownOn } from './model'
+import { KINDS, KIND_LABELS, SCOPES, isFixedProfile } from './model'
 
 export type PaneElements = Pick<
   Elements['terminal'],
@@ -22,8 +22,9 @@ export type PaneModel = {
   items: readonly Item[]
   profiles: readonly Profile[]
   profile: Profile
+  applied: string
+  isOn: (item: Item) => boolean
   view: View
-  focused: string
   columns: number
   rows: number
   isDocked: boolean
@@ -50,9 +51,6 @@ const KINDS_WITHOUT_SECTION: readonly Kind[] = ['instruction']
 const PROFILE_KEY_PREFIX = 'profile:'
 const MENU_KEY_PREFIX = 'menu:'
 const ACTION_KEY_PREFIX = 'action:'
-const PROFILE_KEY_PREFIXES = [PROFILE_KEY_PREFIX, MENU_KEY_PREFIX] as const
-const MENU_CLOSED_MARK = '▸'
-const MENU_OPEN_MARK = '◂'
 const APPLIED_COLOR = 'success'
 const PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate', 'rename', 'delete']
 const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate']
@@ -69,18 +67,17 @@ export const visibleItems = (items: readonly Item[], view: View) =>
 export const actionsOf = (name: string) =>
   isFixedProfile(name) ? FIXED_PROFILE_ACTIONS : PROFILE_ACTIONS
 
-export const profileOfKey = (key: string | undefined) => {
-  const prefix = PROFILE_KEY_PREFIXES.find(one => key?.startsWith(one))
-
-  return key !== undefined && prefix !== undefined ? key.slice(prefix.length) : ''
-}
-
-export const pageSize = (rows: number) => Math.max(MIN_LIST_ROWS, rows - CHROME_ROWS)
+export const pageSize = (rows: number, menuRows = 0) =>
+  Math.max(MIN_LIST_ROWS, rows - CHROME_ROWS - menuRows)
 
 export const withToggledSection = (open: readonly Kind[], kind: Kind): Kind[] =>
   open.includes(kind) ? open.filter(one => one !== kind) : [...open, kind]
 
-export const linesOf = (items: readonly Item[], profile: Profile, view: View): Line[] => {
+export const linesOf = (
+  items: readonly Item[],
+  isOn: (item: Item) => boolean,
+  view: View,
+): Line[] => {
   const visible = visibleItems(items, view)
 
   return KINDS.flatMap((kind): Line[] => {
@@ -95,7 +92,7 @@ export const linesOf = (items: readonly Item[], profile: Profile, view: View): L
         kind,
         isOpen,
         count: ofKind.length,
-        offCount: ofKind.filter(item => !isShownOn(profile, item)).length,
+        offCount: ofKind.filter(item => !isOn(item)).length,
       },
       ...(isOpen ? ofKind.map(item => ({ item, isInSection: true })) : []),
     ]
@@ -120,22 +117,24 @@ export const drawBand = (
 
 export const drawPane = (
   { Box, Text, Button, Input, Select }: PaneElements,
-  { items, profiles, profile, view, focused, columns, rows, isDocked }: PaneModel,
+  { items, profiles, profile, applied, isOn, view, columns, rows, isDocked }: PaneModel,
   actions: PaneActions,
 ) => {
-  const lines = linesOf(items, profile, view)
-  const size = pageSize(rows)
+  const isMenuOpen = view.edit === 'menu' && view.target === profile.name
+  const menuActions = isMenuOpen ? actionsOf(profile.name) : []
+  const lines = linesOf(items, isOn, view)
+  const size = pageSize(rows, menuActions.length)
   const pages = Math.max(1, Math.ceil(lines.length / size))
   const page = Math.min(view.page, pages - 1)
   const room = Math.max(20, columns - FRAME_COLUMNS - INDENT_COLUMNS - CHECKBOX_COLUMNS - SCOPE_COLUMNS - 2)
   const nameWidth = Math.floor(room * NAME_SHARE)
-  const offCount = items.filter(item => !isShownOn(profile, item)).length
+  const offCount = items.filter(item => !isOn(item)).length
   const isRenaming =
     view.edit === 'rename' &&
     !isFixedProfile(view.target) &&
     profiles.some(one => one.name === view.target)
   const scopeOptions = [
-    { value: ALL, label: 'All scopes' },
+    { value: ALL, label: 'All' },
     ...SCOPES.filter(scope => items.some(item => item.scope === scope)).map(scope => ({
       value: scope,
       label: scope,
@@ -159,7 +158,7 @@ export const drawPane = (
   )
 
   const drawItem = ({ item, isInSection }: ItemLine) => {
-    const isOn = isShownOn(profile, item)
+    const isItemOn = isOn(item)
     const origin = item.isLocked ? `locked · ${item.origin}` : item.origin
 
     return (
@@ -170,12 +169,12 @@ export const drawPane = (
           <Button
             key={`toggle:${item.id}`}
             plain
-            label={isOn ? CHECKED : UNCHECKED}
+            label={isItemOn ? CHECKED : UNCHECKED}
             onPress={() => actions.onToggle(item.id)}
           />
         )}
-        <Text dimColor={!isOn}>{clipEnd(item.name, nameWidth).padEnd(nameWidth)}</Text>
-        <Text color="suggestion" dimColor={!isOn}>
+        <Text dimColor={!isItemOn}>{clipEnd(item.name, nameWidth).padEnd(nameWidth)}</Text>
+        <Text color="suggestion" dimColor={!isItemOn}>
           {item.scope.padEnd(SCOPE_COLUMNS - 2)}
         </Text>
         <Text dimColor>{clipStart(origin, room - nameWidth)}</Text>
@@ -184,42 +183,51 @@ export const drawPane = (
   }
 
   const drawProfile = (one: Profile) => {
-    const isApplied = one.name === profile.name
-    const isMenuOpen = view.edit === 'menu' && view.target === one.name
-    const isLit = isMenuOpen || one.name === focused
+    const isApplied = one.name === applied
+    const isShown = one.name === profile.name
 
     return (
-      <Box flexDirection="row" gap={1}>
-        <Box flexDirection="row">
-          {isApplied && <Text color={APPLIED_COLOR}>[</Text>}
-          <Button
-            key={`${PROFILE_KEY_PREFIX}${one.name}`}
-            plain
-            dimColor={!isLit}
-            label={one.name}
-            onPress={() => actions.onView({ focused: one.name })}
-          />
-          {isApplied && <Text color={APPLIED_COLOR}>]</Text>}
-        </Box>
-        {isLit && (
-          <Button
-            key={`${MENU_KEY_PREFIX}${one.name}`}
-            plain
-            label={isMenuOpen ? MENU_OPEN_MARK : MENU_CLOSED_MARK}
-            onPress={() =>
-              actions.onView(isMenuOpen ? { edit: 'none' } : { edit: 'menu', target: one.name })
-            }
-          />
-        )}
-        {isMenuOpen &&
-          actionsOf(one.name).map(action => (
+      <Box flexDirection="column">
+        <Box flexDirection="row" gap={1}>
+          <Box flexDirection="row">
+            {isApplied && <Text color={APPLIED_COLOR}>[</Text>}
             <Button
-              key={`${ACTION_KEY_PREFIX}${action}`}
+              key={`${PROFILE_KEY_PREFIX}${one.name}`}
               plain
-              label={action}
-              onPress={() => actions.onAction(one.name, action)}
+              dimColor={!isShown}
+              label={one.name}
+              onPress={() =>
+                actions.onView({
+                  viewed: one.name,
+                  ...(view.edit === 'menu' ? { edit: 'none' as const } : {}),
+                })
+              }
             />
-          ))}
+            {isApplied && <Text color={APPLIED_COLOR}>]</Text>}
+          </Box>
+          {isShown && (
+            <Button
+              key={`${MENU_KEY_PREFIX}${one.name}`}
+              plain
+              label={isMenuOpen ? OPEN_MARK : CLOSED_MARK}
+              onPress={() =>
+                actions.onView(isMenuOpen ? { edit: 'none' } : { edit: 'menu', target: one.name })
+              }
+            />
+          )}
+        </Box>
+        {isShown && isMenuOpen && (
+          <Box key="profile-menu" flexDirection="column">
+            {menuActions.map(action => (
+              <Button
+                key={`${ACTION_KEY_PREFIX}${action}`}
+                plain
+                label={action}
+                onPress={() => actions.onAction(one.name, action)}
+              />
+            ))}
+          </Box>
+        )}
       </Box>
     )
   }

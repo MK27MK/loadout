@@ -68,7 +68,7 @@ export type View = {
   notice: string
   edit: ProfileEdit
   target: string
-  focused: string
+  viewed: string
 }
 
 export type Stash = Record<string, Item>
