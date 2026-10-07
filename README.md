@@ -5,13 +5,14 @@ A Claude Code mod that manages your harness: every skill, rule, memory, MCP serv
 ## Install
 
 ```
-/plugin install pristine --marketplace <owner>/<repo>
+/plugin marketplace add MK27MK/pristine
+/plugin install pristine@pristine
 ```
 
-To run it from a local folder instead:
+To run it from a local clone instead:
 
 ```
-claude --plugin-dir ~/Documents/code/pristine
+claude --plugin-dir path/to/pristine
 ```
 
 ## The pane
@@ -105,3 +106,7 @@ claude plugin test .
 ```
 
 The engine does not allow `$` to cross an import, so every engine call is in `hooks/register.tsx`. The other files in `hooks/` are pure functions.
+
+## License
+
+[MIT](LICENSE)
