@@ -140,7 +140,10 @@ const pristine = ($: Engine, args: string) =>
 const mountPane = (
   $: Engine,
   surface: 'terminal' | 'desktop' = 'terminal',
-  props: Omit<typeof PANE, 'isFocused'> & { isFocused: boolean } = PANE,
+  props: Omit<typeof PANE, 'isFocused' | 'bodyColumns'> & {
+    isFocused: boolean
+    bodyColumns: number
+  } = PANE,
 ) =>
   $.ui.mount({
     plugin: 'pristine',
@@ -166,11 +169,16 @@ const startSession = ($: Engine) =>
 type MountedPane = Awaited<ReturnType<typeof mountPane>>
 
 const PROFILE_ACTIONS = ['apply', 'duplicate', 'rename', 'delete']
+const MENU_BORDER_ROWS = 2
 const SKILL_TOGGLE = 'toggle:skill:ecc:plan'
 const PLUGIN_TOGGLE = `toggle:plugin:${USER_SETTINGS_PATH}:enabledPlugins.ecc@ecc:`
 
-const isDim = async (ui: MountedPane, name: string) =>
-  (await ui.find({ key: `profile:${name}` }))?.props.dimColor
+const lookOf = async (ui: MountedPane, name: string) => {
+  const tab = await ui.find({ key: `profile:${name}` })
+  if (tab !== undefined) return tab.props.dimColor ? 'dim' : 'lit'
+
+  return (await ui.find({ type: 'Text', text: new RegExp(`^${name}$`) }))?.props.color
+}
 
 const checkboxes = async (ui: MountedPane) => [
   (await ui.find({ key: SKILL_TOGGLE }))?.text,
@@ -178,7 +186,8 @@ const checkboxes = async (ui: MountedPane) => [
 ]
 
 const openMenu = async (ui: MountedPane, name: string) => {
-  await ui.press({ key: `profile:${name}` })
+  if ((await ui.find({ key: `profile:${name}` })) !== undefined)
+    await ui.press({ key: `profile:${name}` })
   await ui.press({ key: `menu:${name}` })
 }
 
@@ -583,7 +592,7 @@ test('creates a profile from the plus tab', async ($, on) => {
   expect(hidden).toBeUndefined()
   expect(listed.text).toContain('* ecc-react')
   expect(await ui.find({ key: 'new-profile-name' })).toBeUndefined()
-  expect(await ui.find({ key: 'profile:ecc-react' })).toBeDefined()
+  expect(await lookOf(ui, 'ecc-react')).toBe('suggestion')
   await ui.unmount()
 })
 
@@ -599,7 +608,7 @@ test('renames the active profile from the pane and keeps it active', async ($, o
 
   expect(listed.text).toContain('* ecc-react (base off, 1 overrides)')
   expect(listed.text).not.toContain('temp')
-  expect(await ui.find({ key: 'profile:ecc-react' })).toBeDefined()
+  expect(await lookOf(ui, 'ecc-react')).toBe('suggestion')
   expect(await ui.find({ key: 'rename-profile-name' })).toBeUndefined()
   await ui.unmount()
 })
@@ -729,20 +738,20 @@ test('never changes vanilla, whatever is toggled under it', async ($, on) => {
   await ui.unmount()
 })
 
-test('brackets the applied profile in green and lights the one whose harness is shown', async ($, on) => {
+test('brackets the applied profile in the scope color and lights the one whose harness is shown', async ($, on) => {
   harness(on)
   await pristine($, 'status')
   const ui = await mountPane($)
 
   const brackets = await ui.findAll({ type: 'Text', text: /^[[\]]$/ })
-  const atRest = [await isDim(ui, 'default'), await isDim(ui, 'vanilla')]
+  const atRest = [await lookOf(ui, 'default'), await lookOf(ui, 'vanilla')]
   await ui.press({ key: 'profile:vanilla' })
-  const clicked = [await isDim(ui, 'default'), await isDim(ui, 'vanilla')]
+  const clicked = [await lookOf(ui, 'default'), await lookOf(ui, 'vanilla')]
   const applied = (await pristine($, 'list')).text
 
-  expect(brackets.map(one => one.props.color)).toEqual(['success', 'success'])
-  expect(atRest).toEqual([false, true])
-  expect(clicked).toEqual([true, false])
+  expect(brackets.map(one => one.props.color)).toEqual(['suggestion', 'suggestion'])
+  expect(atRest).toEqual(['suggestion', 'dim'])
+  expect(clicked).toEqual(['dim', 'lit'])
   expect(applied).toContain('* default')
   await ui.unmount()
 })
@@ -760,13 +769,13 @@ test('keeps the clicked profile lit once the focus moves on or leaves the pane',
     element: 'refresh',
     origin: { kind: 'person' },
   })
-  const afterFocusMoved = [await isDim(ui, 'default'), await isDim(ui, 'vanilla')]
+  const afterFocusMoved = [await lookOf(ui, 'default'), await lookOf(ui, 'vanilla')]
   await ui.unmount()
   const unfocused = await mountPane($, 'terminal', { ...PANE, isFocused: false })
-  const afterFocusLeft = [await isDim(unfocused, 'default'), await isDim(unfocused, 'vanilla')]
+  const afterFocusLeft = [await lookOf(unfocused, 'default'), await lookOf(unfocused, 'vanilla')]
 
-  expect(afterFocusMoved).toEqual([true, false])
-  expect(afterFocusLeft).toEqual([true, false])
+  expect(afterFocusMoved).toEqual(['dim', 'lit'])
+  expect(afterFocusLeft).toEqual(['dim', 'lit'])
   await unfocused.unmount()
 })
 
@@ -826,7 +835,7 @@ test('shows the profile a command applies', async ($, on) => {
   await ui.press({ key: 'profile:vanilla' })
   await pristine($, 'new temp on')
 
-  expect([await isDim(ui, 'vanilla'), await isDim(ui, 'temp')]).toEqual([true, false])
+  expect([await lookOf(ui, 'vanilla'), await lookOf(ui, 'temp')]).toEqual(['dim', 'suggestion'])
   await ui.unmount()
 })
 
@@ -839,7 +848,7 @@ test('keeps showing a profile under its new name once it is renamed', async ($, 
   await ui.press({ key: 'profile:temp' })
   await pristine($, 'rename temp kept')
 
-  expect([await isDim(ui, 'default'), await isDim(ui, 'kept')]).toEqual([true, false])
+  expect([await lookOf(ui, 'default'), await lookOf(ui, 'kept')]).toEqual(['dim', 'lit'])
   await ui.unmount()
 })
 
@@ -888,6 +897,7 @@ test('stacks the actions one under the other and folds them on a second press', 
   await ui.press({ key: 'menu:default' })
 
   expect(menu?.props.flexDirection).toBe('column')
+  expect(menu?.props.borderStyle).toBe('round')
   expect(stacked.map(one => one.props.key)).toEqual(PROFILE_ACTIONS.map(action => `action:${action}`))
   expect(await ui.find({ key: 'action:apply' })).toBeUndefined()
   expect(await ui.find({ key: 'profile-menu' })).toBeUndefined()
@@ -904,7 +914,7 @@ test('keeps the profile tabs in the pane while the actions are open', async ($, 
   const whenFolded = await rowsOf()
   await openMenu(ui, 'default')
 
-  expect(whenFolded - (await rowsOf())).toBe(PROFILE_ACTIONS.length)
+  expect(whenFolded - (await rowsOf())).toBe(PROFILE_ACTIONS.length + MENU_BORDER_ROWS)
   await ui.unmount()
 })
 
@@ -1042,6 +1052,50 @@ test('lists a memory file seen after the pane opened without a refresh', async (
 
   expect(before).toBeUndefined()
   expect(after).toBeDefined()
+  await ui.unmount()
+})
+
+test('links an origin to its whole path even when the pane clips it', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  await $.prompt.context({ blocks: [], instructionFiles: [CLAUDE_MD, MEMORY_FILE] })
+  const ui = await mountPane($, 'terminal', { ...PANE, bodyColumns: 60 })
+  await ui.press({ key: 'section:memory' })
+
+  const links = await ui.findAll({ type: 'Link' })
+  const memory = links.find(one => one.props.href === `file://${MEMORY_FILE.path}`)
+  const plugin = links.find(one => String(one.props.href).includes('plugin'))
+
+  expect(memory?.text.startsWith('…')).toBe(true)
+  expect(MEMORY_FILE.path.endsWith(memory?.text.slice(1) ?? '?')).toBe(true)
+  expect(links.some(one => one.props.href === `file://${CLAUDE_MD.path}`)).toBe(true)
+  expect(plugin).toBeUndefined()
+  await ui.unmount()
+})
+
+test('links a file that was imported to the file itself, not to the note after it', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const imported = { ...RULE_FILE, parent: CLAUDE_MD.path }
+  await $.prompt.context({ blocks: [], instructionFiles: [imported] })
+  const ui = await mountPaneWithOpen($, 'rule')
+
+  const links = await ui.findAll({ type: 'Link' })
+
+  expect(links.map(one => one.props.href)).toContain(`file://${RULE_FILE.path}`)
+  await ui.unmount()
+})
+
+test('encodes a path with spaces in the link it draws', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const spaced = { ...CLAUDE_MD, path: `${ROOT}/My Notes/CLAUDE#1.md` }
+  await $.prompt.context({ blocks: [], instructionFiles: [spaced] })
+  const ui = await mountPane($)
+
+  const links = await ui.findAll({ type: 'Link' })
+
+  expect(links.map(one => one.props.href)).toContain(`file://${ROOT}/My%20Notes/CLAUDE%231.md`)
   await ui.unmount()
 })
 

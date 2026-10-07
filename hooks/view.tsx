@@ -5,7 +5,7 @@ import { KINDS, KIND_LABELS, SCOPES, isFixedProfile } from './model'
 
 export type PaneElements = Pick<
   Elements['terminal'],
-  'Box' | 'Text' | 'Button' | 'Input' | 'Select'
+  'Box' | 'Text' | 'Button' | 'Input' | 'Select' | 'Link'
 >
 
 export type PaneActions = {
@@ -51,7 +51,10 @@ const KINDS_WITHOUT_SECTION: readonly Kind[] = ['instruction']
 const PROFILE_KEY_PREFIX = 'profile:'
 const MENU_KEY_PREFIX = 'menu:'
 const ACTION_KEY_PREFIX = 'action:'
-const APPLIED_COLOR = 'success'
+const APPLIED_COLOR = 'suggestion'
+const MENU_BORDER_ROWS = 2
+const ORIGIN_NOTE = / (\(@import from .*\)|or commands)$/
+const FILE_SCHEME = 'file://'
 const PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate', 'rename', 'delete']
 const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate']
 const NAME_FIELDS = {
@@ -100,6 +103,11 @@ const linesOf = (
   })
 }
 
+const fileLinkOf = (origin: string) =>
+  origin.startsWith('/')
+    ? `${FILE_SCHEME}${origin.replace(ORIGIN_NOTE, '').split('/').map(encodeURIComponent).join('/')}`
+    : undefined
+
 export const drawBand = (
   { Box, Button }: Pick<PaneElements, 'Box' | 'Button'>,
   profileName: string,
@@ -117,14 +125,14 @@ export const drawBand = (
 )
 
 export const drawPane = (
-  { Box, Text, Button, Input, Select }: PaneElements,
+  { Box, Text, Button, Input, Select, Link }: PaneElements,
   { items, profiles, profile, applied, isOn, view, columns, rows, isDocked }: PaneModel,
   actions: PaneActions,
 ) => {
   const isMenuOpen = view.edit === 'menu' && view.target === profile.name
   const menuActions = isMenuOpen ? actionsOf(profile.name) : []
   const lines = linesOf(items, isOn, view)
-  const size = pageSize(rows, menuActions.length)
+  const size = pageSize(rows, isMenuOpen ? menuActions.length + MENU_BORDER_ROWS : 0)
   const pages = Math.max(1, Math.ceil(lines.length / size))
   const page = Math.min(view.page, pages - 1)
   const room = Math.max(20, columns - FRAME_COLUMNS - INDENT_COLUMNS - CHECKBOX_COLUMNS - SCOPE_COLUMNS - 2)
@@ -179,7 +187,11 @@ export const drawPane = (
 
   const drawItem = ({ item, isInSection }: ItemLine) => {
     const isItemOn = isOn(item)
-    const origin = item.isLocked ? `locked · ${item.origin}` : item.origin
+    const origin = clipStart(
+      item.isLocked ? `locked · ${item.origin}` : item.origin,
+      room - nameWidth,
+    )
+    const fileLink = fileLinkOf(item.origin)
 
     return (
       <Box flexDirection="row" gap={1} paddingLeft={isInSection ? INDENT_COLUMNS : 0}>
@@ -197,7 +209,9 @@ export const drawPane = (
         <Text color="suggestion" dimColor={!isItemOn}>
           {item.scope.padEnd(SCOPE_COLUMNS - 2)}
         </Text>
-        <Text dimColor>{clipStart(origin, room - nameWidth)}</Text>
+        <Text dimColor>
+          {fileLink === undefined ? origin : <Link href={fileLink} label={origin} />}
+        </Text>
       </Box>
     )
   }
@@ -211,18 +225,22 @@ export const drawPane = (
         <Box flexDirection="row" gap={1}>
           <Box flexDirection="row">
             {isApplied && <Text color={APPLIED_COLOR}>[</Text>}
-            <Button
-              key={`${PROFILE_KEY_PREFIX}${one.name}`}
-              plain
-              dimColor={!isShown}
-              label={one.name}
-              onPress={() =>
-                actions.onView({
-                  viewed: one.name,
-                  ...(view.edit === 'menu' ? { edit: 'none' as const } : {}),
-                })
-              }
-            />
+            {isApplied && isShown ? (
+              <Text color={APPLIED_COLOR}>{one.name}</Text>
+            ) : (
+              <Button
+                key={`${PROFILE_KEY_PREFIX}${one.name}`}
+                plain
+                dimColor={!isShown}
+                label={one.name}
+                onPress={() =>
+                  actions.onView({
+                    viewed: one.name,
+                    ...(view.edit === 'menu' ? { edit: 'none' as const } : {}),
+                  })
+                }
+              />
+            )}
             {isApplied && <Text color={APPLIED_COLOR}>]</Text>}
           </Box>
           {isShown && (
@@ -237,7 +255,7 @@ export const drawPane = (
           )}
         </Box>
         {isShown && isMenuOpen && (
-          <Box key="profile-menu" flexDirection="column">
+          <Box key="profile-menu" flexDirection="column" {...FRAME}>
             {menuActions.map(action => (
               <Button
                 key={`${ACTION_KEY_PREFIX}${action}`}
