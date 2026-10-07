@@ -160,7 +160,6 @@ export const drawPane = (
   const lines = linesOf(items, isOn, view)
   const room = Math.max(20, columns - FRAME_COLUMNS - INDENT_COLUMNS - CHECKBOX_COLUMNS - SCOPE_COLUMNS - 2)
   const nameWidth = Math.floor(room * NAME_SHARE)
-  const offCount = items.filter(item => !isOn(item)).length
   const isRenaming =
     view.edit === 'rename' &&
     !isFixedProfile(view.target) &&
@@ -357,9 +356,7 @@ export const drawPane = (
           <Text bold color="claude">
             Loadout
           </Text>
-          <Text dimColor>
-            {profile.name} · base {profile.base} · {offCount} of {items.length} off
-          </Text>
+          <Text dimColor>{profile.name}</Text>
         </Box>
         <Box flexDirection="row" gap={2}>
           <Button key="refresh" plain dimColor label="Refresh" hotkey="r" onPress={actions.onRefresh} />

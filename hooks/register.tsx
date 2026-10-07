@@ -737,7 +737,7 @@ const listProfiles = async ($: EngineInterface) => {
   return (await profilesOf($))
     .map(
       profile =>
-        `${profile.name === active.name ? '*' : ' '} ${profile.name} (base ${profile.base}, ${Object.keys(profile.overrides).length} overrides)`,
+        `${profile.name === active.name ? '*' : ' '} ${profile.name} (${Object.keys(profile.overrides).length} overrides)`,
     )
     .join('\n')
 }

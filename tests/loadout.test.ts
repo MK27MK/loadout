@@ -213,7 +213,9 @@ const lookOf = async (ui: MountedPane, name: string) => {
   const tab = await ui.find({ key: `profile:${name}` })
   if (tab !== undefined) return tab.props.dimColor ? 'dim' : 'lit'
 
-  return (await ui.find({ type: 'Text', text: new RegExp(`^${name}$`) }))?.props.color
+  const named = await ui.findAll({ type: 'Text', text: new RegExp(`^${name}$`) })
+
+  return named.find(one => one.props.color !== undefined)?.props.color
 }
 
 const checkboxes = async (ui: MountedPane) => [
@@ -367,7 +369,7 @@ test('composes a profile: vanilla base with one skill switched back on', async (
   const listed = await loadout($, 'list')
 
   expect(ran.text).toBe('ran ecc:plan')
-  expect(listed.text).toContain('* ecc-react (base off, 1 overrides)')
+  expect(listed.text).toContain('* ecc-react (1 overrides)')
   await ui.unmount()
 })
 
@@ -652,7 +654,7 @@ test('renames the active profile from the pane and keeps it active', async ($, o
   await ui.input({ key: 'rename-profile-name', text: 'ecc-react' })
   const listed = await loadout($, 'list')
 
-  expect(listed.text).toContain('* ecc-react (base off, 1 overrides)')
+  expect(listed.text).toContain('* ecc-react (1 overrides)')
   expect(listed.text).not.toContain('temp')
   expect(await lookOf(ui, 'ecc-react')).toBe('suggestion')
   expect(await ui.find({ key: 'rename-profile-name' })).toBeUndefined()
@@ -680,8 +682,8 @@ test('duplicates a profile that is not applied from its dropdown', async ($, on)
   const listed = await loadout($, 'list')
 
   expect(field?.props.label).toBe('Duplicate "vanilla"')
-  expect(listed.text).toContain('* bare (base off, 0 overrides)')
-  expect(listed.text).toContain('  vanilla (base off, 0 overrides)')
+  expect(listed.text).toContain('* bare (0 overrides)')
+  expect(listed.text).toContain('  vanilla (0 overrides)')
   await ui.unmount()
 })
 
@@ -694,7 +696,7 @@ test('renames default like any other profile and keeps it applied', async ($, on
   await ui.input({ key: 'rename-profile-name', text: 'mine' })
   const listed = await loadout($, 'list')
 
-  expect(listed.text).toContain('* mine (base on, 0 overrides)')
+  expect(listed.text).toContain('* mine (0 overrides)')
   expect(listed.text).not.toContain('default')
   await ui.unmount()
 })
@@ -707,7 +709,7 @@ test('deletes default from its dropdown and applies the next profile left', asyn
   await act(ui, 'default', 'delete')
   const listed = await loadout($, 'list')
 
-  expect(listed.text).toBe('* vanilla (base off, 0 overrides)')
+  expect(listed.text).toBe('* vanilla (0 overrides)')
   expect(files.userSettings().enabledPlugins).toEqual({ 'ecc@ecc': false })
   expect(await ui.find({ key: 'profile:default' })).toBeUndefined()
   await ui.unmount()
@@ -739,7 +741,7 @@ test('restore resets the applied profile and brings no default back', async ($, 
 
   expect(answer.text).toContain('profile "mine" is active')
   expect(listed.text).toBe(
-    '* mine (base on, 0 overrides)\n  vanilla (base off, 0 overrides)',
+    '* mine (0 overrides)\n  vanilla (0 overrides)',
   )
   expect(files.userSettings()).toEqual(USER_SETTINGS)
   await ui.unmount()
@@ -753,7 +755,7 @@ test('restore under vanilla goes back to the profile that carries the setup', as
   await loadout($, 'restore')
 
   expect((await loadout($, 'list')).text).toBe(
-    '* mine (base on, 0 overrides)\n  vanilla (base off, 0 overrides)',
+    '* mine (0 overrides)\n  vanilla (0 overrides)',
   )
 })
 
@@ -779,7 +781,7 @@ test('never changes vanilla, whatever is toggled under it', async ($, on) => {
   const listed = await loadout($, 'list')
 
   expect(ran.text).toContain('/ecc:plan is turned off')
-  expect(listed.text).toContain('* vanilla (base off, 0 overrides)')
+  expect(listed.text).toContain('* vanilla (0 overrides)')
   expect(await ui.find({ type: 'Text', text: /cannot be changed/ })).toBeDefined()
   await ui.unmount()
 })
@@ -833,12 +835,12 @@ test('shows the checkboxes of the profile that is clicked, not those of the appl
   const underDefault = await checkboxes(ui)
   await ui.press({ key: 'profile:vanilla' })
   const underVanilla = await checkboxes(ui)
-  const heading = await ui.find({ type: 'Text', text: /vanilla · base off/ })
+  const heading = await ui.find({ type: 'Text', text: /^vanilla$/ })
   await ui.press({ key: 'profile:default' })
 
   expect(underDefault).toEqual(['☑', '☑'])
   expect(underVanilla).toEqual(['☐', '☐'])
-  expect(heading).toBeDefined()
+  expect(heading?.props.dimColor).toBe(true)
   expect(await checkboxes(ui)).toEqual(['☑', '☑'])
   expect(files.userSettings()).toEqual(USER_SETTINGS)
   expect((await loadout($, 'list')).text).toContain('* default')
@@ -865,8 +867,8 @@ test('a toggle changes the profile that is shown and leaves the applied one alon
   expect(underTemp).toEqual(['☐', '☐'])
   expect(underDefault).toEqual(['☑', '☑'])
   expect(ran.text).toBe('ran ecc:plan')
-  expect(listed).toContain('* default (base on, 0 overrides)')
-  expect(listed).toContain('  temp (base on, 2 overrides)')
+  expect(listed).toContain('* default (0 overrides)')
+  expect(listed).toContain('  temp (2 overrides)')
   expect(whileNotApplied).toEqual(USER_SETTINGS)
   expect(files.userSettings().enabledPlugins).toEqual({ 'ecc@ecc': false })
   expect(await checkboxes(ui)).toEqual(['☐', '☐'])
@@ -909,7 +911,7 @@ test('the plus tab duplicates the profile whose harness is shown', async ($, on)
   await ui.input({ key: 'new-profile-name', text: 'bare' })
 
   expect(field?.props.label).toBe('Duplicate "vanilla"')
-  expect((await loadout($, 'list')).text).toContain('* bare (base off, 0 overrides)')
+  expect((await loadout($, 'list')).text).toContain('* bare (0 overrides)')
   await ui.unmount()
 })
 
@@ -974,7 +976,7 @@ test('renames a profile that is not active from the command', async ($, on) => {
 
   expect(answer.text).toBe('Profile "temp" is now "ecc-react".')
   expect(listed.text).toContain('* default')
-  expect(listed.text).toContain('  ecc-react (base off, 0 overrides)')
+  expect(listed.text).toContain('  ecc-react (0 overrides)')
   expect(listed.text).not.toContain('temp')
 })
 
@@ -1024,7 +1026,7 @@ test('a fresh install has default and vanilla and asks once what to call default
   await startSession($)
 
   expect(listed.text).toBe(
-    '* mine (base on, 0 overrides)\n  vanilla (base off, 0 overrides)',
+    '* mine (0 overrides)\n  vanilla (0 overrides)',
   )
   expect(files.asked.length).toBe(1)
   expect(files.asked[0]).toContain('call the profile')
@@ -1038,7 +1040,7 @@ test('keeps the name default when the person leaves the question unanswered', as
 
   expect(files.asked.length).toBe(1)
   expect(listed.text).toBe(
-    '* default (base on, 0 overrides)\n  vanilla (base off, 0 overrides)',
+    '* default (0 overrides)\n  vanilla (0 overrides)',
   )
 })
 
@@ -1158,7 +1160,7 @@ test('creates, renames, applies and deletes a profile even when the focus cannot
   await act(ui, 'vanilla', 'apply')
   await act(ui, 'kept', 'delete')
 
-  expect(renamed).toContain('* kept (base off, 0 overrides)')
+  expect(renamed).toContain('* kept (0 overrides)')
   expect((await loadout($, 'list')).text).toContain('* vanilla')
   expect((await loadout($, 'list')).text).not.toContain('kept')
   expect(await ui.find({ type: 'Text', text: /loadout failed/ })).toBeUndefined()
@@ -1352,7 +1354,7 @@ test('draws the stored profile in a pane left open across a clear', async ($, on
   const ui = await mountPane($)
 
   expect(await lookOf(ui, 'work')).toBe('suggestion')
-  expect(await ui.find({ type: 'Text', text: /^work · base on/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^work$/ }))?.props.dimColor).toBe(true)
   await ui.unmount()
 })
 
@@ -1388,7 +1390,7 @@ test('adds to what a profile already turned off when something is toggled after 
 
   await ui.press({ key: `toggle:instruction:${NESTED_CLAUDE_MD}` })
 
-  expect((await loadout($, 'list')).text).toContain('* work (base on, 2 overrides)')
+  expect((await loadout($, 'list')).text).toContain('* work (2 overrides)')
   await ui.unmount()
 })
 
@@ -1401,7 +1403,7 @@ test('loads the stored profile once when hooks ask for it together after a clear
   ])
 
   expect(first.text).toContain('/ecc:plan is turned off')
-  expect(second.text).toContain('* work (base on, 1 overrides)')
+  expect(second.text).toContain('* work (1 overrides)')
 })
 
 test('lists the files of the session project found on disk even when the engine reported none', async ($, on) => {
