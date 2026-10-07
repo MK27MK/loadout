@@ -1,11 +1,12 @@
 import type { Elements } from 'claude-code'
 
-import type { Item, Kind, Profile, ProfileAction, Scope, View } from '../types'
+import type { Item, Kind, Picker, Profile, ProfileAction, Scope, View } from '../types'
 import { KINDS, KIND_LABELS, SCOPES, isFixedProfile } from './model'
+import { projectLabel } from './project'
 
 export type PaneElements = Pick<
   Elements['terminal'],
-  'Box' | 'Text' | 'Button' | 'Input' | 'Select' | 'Link'
+  'Box' | 'Text' | 'Button' | 'Input' | 'Link'
 >
 
 export type PaneActions = {
@@ -15,11 +16,14 @@ export type PaneActions = {
   onRename: (name: string) => void
   onRestore: () => void
   onRefresh: () => void
+  onProject: (path: string) => void
   onView: (patch: Partial<View>) => void
 }
 
 export type PaneModel = {
   items: readonly Item[]
+  root: string
+  projects: readonly string[]
   profiles: readonly Profile[]
   profile: Profile
   applied: string
@@ -33,6 +37,8 @@ export type PaneModel = {
 type SectionLine = { kind: Kind; isOpen: boolean; count: number; offCount: number }
 type ItemLine = { item: Item; isInSection: boolean }
 type Line = SectionLine | ItemLine
+type PickerOption = { value: string; label: string }
+type OpenPicker = Exclude<Picker, 'none'>
 
 const CHROME_ROWS = 13
 const FRAME_COLUMNS = 4
@@ -51,6 +57,12 @@ const KINDS_WITHOUT_SECTION: readonly Kind[] = ['instruction']
 const PROFILE_KEY_PREFIX = 'profile:'
 const MENU_KEY_PREFIX = 'menu:'
 const ACTION_KEY_PREFIX = 'action:'
+const PICKER_KEY_PREFIX = 'picker:'
+const PICK_KEY_PREFIX = 'pick:'
+const PICKER_LABELS: Readonly<Record<OpenPicker, string>> = {
+  project: 'Project',
+  scope: 'Scope',
+}
 const APPLIED_COLOR = 'suggestion'
 const MENU_BORDER_ROWS = 2
 const ORIGIN_NOTE = / (\(@import from .*\)|or commands)$/
@@ -103,6 +115,8 @@ const linesOf = (
   })
 }
 
+export const menuKeyOf = (name: string) => `${MENU_KEY_PREFIX}${name}`
+
 const fileLinkOf = (origin: string) =>
   origin.startsWith('/')
     ? `${FILE_SCHEME}${origin.replace(ORIGIN_NOTE, '').split('/').map(encodeURIComponent).join('/')}`
@@ -125,16 +139,25 @@ export const drawBand = (
 )
 
 export const drawPane = (
-  { Box, Text, Button, Input, Select, Link }: PaneElements,
-  { items, profiles, profile, applied, isOn, view, columns, rows, isDocked }: PaneModel,
+  { Box, Text, Button, Input, Link }: PaneElements,
+  {
+    items,
+    root,
+    projects,
+    profiles,
+    profile,
+    applied,
+    isOn,
+    view,
+    columns,
+    rows,
+    isDocked,
+  }: PaneModel,
   actions: PaneActions,
 ) => {
   const isMenuOpen = view.edit === 'menu' && view.target === profile.name
   const menuActions = isMenuOpen ? actionsOf(profile.name) : []
   const lines = linesOf(items, isOn, view)
-  const size = pageSize(rows, isMenuOpen ? menuActions.length + MENU_BORDER_ROWS : 0)
-  const pages = Math.max(1, Math.ceil(lines.length / size))
-  const page = Math.min(view.page, pages - 1)
   const room = Math.max(20, columns - FRAME_COLUMNS - INDENT_COLUMNS - CHECKBOX_COLUMNS - SCOPE_COLUMNS - 2)
   const nameWidth = Math.floor(room * NAME_SHARE)
   const offCount = items.filter(item => !isOn(item)).length
@@ -142,13 +165,37 @@ export const drawPane = (
     view.edit === 'rename' &&
     !isFixedProfile(view.target) &&
     profiles.some(one => one.name === view.target)
-  const scopeOptions = [
+  const scopeOptions: PickerOption[] = [
     { value: ALL, label: 'All' },
     ...SCOPES.filter(scope => items.some(item => item.scope === scope)).map(scope => ({
       value: scope,
       label: scope,
     })),
   ]
+  const shownProject = view.project === '' ? root : view.project
+  const projectOptions: PickerOption[] = [
+    ...new Set([root, ...projects, shownProject]),
+  ].map(path => ({ value: path, label: projectLabel(path, root) }))
+  const pickers = {
+    project: {
+      options: projectOptions,
+      picked: shownProject,
+      onPick: actions.onProject,
+    },
+    scope: {
+      options: scopeOptions,
+      picked: view.scope,
+      onPick: (value: string) =>
+        actions.onView({ scope: value as Scope | 'all', page: 0, picker: 'none' }),
+    },
+  }
+  const openRows = [
+    ...(isMenuOpen ? [menuActions.length] : []),
+    ...(view.picker === 'none' ? [] : [pickers[view.picker].options.length]),
+  ].reduce((total, count) => total + count + MENU_BORDER_ROWS, 0)
+  const size = pageSize(rows, openRows)
+  const pages = Math.max(1, Math.ceil(lines.length / size))
+  const page = Math.min(view.page, pages - 1)
   const drawNameField = (edit: keyof typeof NAME_FIELDS, onSubmit: (name: string) => void) => (
     <Box flexDirection="row" gap={1}>
       <Input
@@ -169,6 +216,39 @@ export const drawPane = (
       />
     </Box>
   )
+
+  const drawPicker = (picker: OpenPicker) => {
+    const { options, picked, onPick } = pickers[picker]
+    const isOpen = view.picker === picker
+    const pickedLabel = options.find(option => option.value === picked)?.label ?? picked
+
+    return (
+      <Box flexDirection="column">
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>{PICKER_LABELS[picker]}</Text>
+          <Button
+            key={`${PICKER_KEY_PREFIX}${picker}`}
+            plain
+            label={`${pickedLabel} ${isOpen ? OPEN_MARK : CLOSED_MARK}`}
+            onPress={() => actions.onView({ picker: isOpen ? 'none' : picker })}
+          />
+        </Box>
+        {isOpen && (
+          <Box key="picker-menu" flexDirection="column" {...FRAME}>
+            {options.map(option => (
+              <Button
+                key={`${PICK_KEY_PREFIX}${picker}:${option.value}`}
+                plain
+                dimColor={option.value !== picked}
+                label={option.label}
+                onPress={() => onPick(option.value)}
+              />
+            ))}
+          </Box>
+        )}
+      </Box>
+    )
+  }
 
   const drawSection = (line: SectionLine) => (
     <Box flexDirection="row" gap={1}>
@@ -245,7 +325,7 @@ export const drawPane = (
           </Box>
           {isShown && (
             <Button
-              key={`${MENU_KEY_PREFIX}${one.name}`}
+              key={menuKeyOf(one.name)}
               plain
               label={isMenuOpen ? OPEN_MARK : CLOSED_MARK}
               onPress={() =>
@@ -286,14 +366,9 @@ export const drawPane = (
           <Button key="restore" plain dimColor label="Restore all" onPress={actions.onRestore} />
         </Box>
       </Box>
-      <Box marginBottom={1}>
-        <Select
-          key="scope"
-          label="Scope"
-          value={view.scope}
-          options={scopeOptions}
-          onSelect={value => actions.onView({ scope: value as Scope | 'all', page: 0 })}
-        />
+      <Box flexDirection="row" gap={2} marginBottom={1}>
+        {drawPicker('project')}
+        {drawPicker('scope')}
       </Box>
       <Box flexDirection="column" {...FRAME}>
         {lines.length === 0 && <Text dimColor>Nothing here in this scope.</Text>}

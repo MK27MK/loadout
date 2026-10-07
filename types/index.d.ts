@@ -59,12 +59,16 @@ export type Profile = {
 
 export type ProfileEdit = 'none' | 'menu' | 'new' | 'rename'
 
+export type Picker = 'none' | 'project' | 'scope'
+
 export type ProfileAction = 'apply' | 'duplicate' | 'rename' | 'delete'
 
 export type View = {
   open: Kind[]
   scope: Scope | 'all'
   page: number
+  project: string
+  picker: Picker
   notice: string
   edit: ProfileEdit
   target: string
@@ -83,8 +87,11 @@ declare module 'claude-code' {
     pristine: {
       profiles: Profile[]
       active: string
+      isLoaded: boolean
       seen: Item[]
       items: Item[]
+      projects: string[]
+      projectItems: Item[]
       view: Shaped<View>
     }
   }

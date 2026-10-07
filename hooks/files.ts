@@ -11,7 +11,7 @@ const BACKUP_FOLDER = 'pristine-backups'
 const JSON_INDENT = 2
 const UNSAFE_FILE_CHARACTERS = /[^A-Za-z0-9]+/g
 
-const isAbsolute = (path: string | undefined): path is string =>
+export const isAbsolute = (path: string | undefined): path is string =>
   path !== undefined && path.startsWith('/')
 
 export const pathsFrom = (

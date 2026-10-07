@@ -47,8 +47,20 @@ import {
   upsertProfile,
   withOverride,
 } from './model'
+import {
+  fileItems,
+  inUserScope,
+  isMarkdownFile,
+  markersOf,
+  namedFilesOf,
+  rulesFoldersOf,
+  userFoldersOf,
+  visibleFolders,
+  withProjectFiles,
+  withSessionFiles,
+} from './project'
 import { isObject, isSoundStashedItem } from './settingsEdit'
-import { drawBand, drawPane } from './view'
+import { drawBand, drawPane, menuKeyOf } from './view'
 
 const PANE = 'pristine'
 const PANE_ROWS = 24
@@ -66,19 +78,24 @@ const LOCKED_SOURCES = [
 const READ_ONLY_VERBS = ['', 'list', 'status']
 const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
 const USAGE =
-  'Usage: /pristine [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | restore]'
+  'Usage: /pristine [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | restore | project [<folder>]]'
 const NO_ITEMS: Item[] = []
+const NO_PROJECTS: string[] = []
+const MAX_RULES_DEPTH = 4
+const TRAILING_SLASHES = /\/+$/
 const STARTING_PROFILES: Profile[] = [...INITIAL_PROFILES]
 const INITIAL_VIEW: View = {
   open: [],
   scope: 'all',
   page: 0,
+  project: '',
+  picker: 'none',
   notice: '',
   edit: 'none',
   target: '',
   viewed: '',
 }
-const VIEW_SHAPE = 'sections-v3'
+const VIEW_SHAPE = 'sections-v5'
 const FIRST_NAME_QUESTION =
   'What should pristine call the profile that carries your current setup?'
 const FIRST_NAME_OPTIONS = {
@@ -88,20 +105,20 @@ const FIRST_NAME_OPTIONS = {
 
 const profilesAtom = atom({ plugin: 'pristine', key: 'profiles' } as const, STARTING_PROFILES)
 const activeAtom = atom({ plugin: 'pristine', key: 'active' } as const, DEFAULT_PROFILE_NAME)
+const loadedAtom = atom({ plugin: 'pristine', key: 'isLoaded' } as const, false)
 const seenAtom = atom({ plugin: 'pristine', key: 'seen' } as const, NO_ITEMS)
 const itemsAtom = atom({ plugin: 'pristine', key: 'items' } as const, NO_ITEMS)
+const projectsAtom = atom({ plugin: 'pristine', key: 'projects' } as const, NO_PROJECTS)
+const projectItemsAtom = atom(
+  { plugin: 'pristine', key: 'projectItems' } as const,
+  NO_ITEMS,
+)
 const viewAtom = atom({ plugin: 'pristine', key: 'view' } as const, INITIAL_VIEW, {
   shape: VIEW_SHAPE,
 })
 
 let lastMutation: Promise<unknown> = Promise.resolve()
-
-const inTurn = <Result,>(work: () => Promise<Result>): Promise<Result> => {
-  const run = lastMutation.then(work, work)
-  lastMutation = run.catch(() => undefined)
-
-  return run
-}
+let loading: Promise<boolean> | undefined
 
 const isProfile = (value: unknown): value is Profile =>
   isObject(value) &&
@@ -156,16 +173,57 @@ const loadLedger = async ($: EngineInterface): Promise<Ledger> => {
   }
 }
 
-const activeProfile = async ($: EngineInterface) =>
-  findProfile(await read($, profilesAtom), await read($, activeAtom))
+const storedProfiles = async ($: EngineInterface) => {
+  const stored = await $.store.get(PROFILES_KEY)
+  const isFirstRun = stored === undefined
+  const kept = Array.isArray(stored) ? stored.filter(isProfile) : []
+
+  return {
+    isFirstRun,
+    ...restoredProfiles(isFirstRun ? undefined : kept, await $.store.get(ACTIVE_KEY)),
+  }
+}
+
+const profilesNow = async ($: EngineInterface) => {
+  const held = {
+    profiles: await read($, profilesAtom),
+    active: await read($, activeAtom),
+  }
+
+  return (await read($, loadedAtom)) ? held : storedProfiles($)
+}
+
+const profilesOf = async ($: EngineInterface) => (await profilesNow($)).profiles
+
+const activeNameOf = async ($: EngineInterface) => (await profilesNow($)).active
+
+const activeProfile = async ($: EngineInterface) => {
+  const { profiles, active } = await profilesNow($)
+
+  return findProfile(profiles, active)
+}
 
 const shownProfile = async ($: EngineInterface) => {
   const { viewed } = await read($, viewAtom)
 
   return (
-    (await read($, profilesAtom)).find(profile => profile.name === viewed) ??
-    activeProfile($)
+    (await profilesOf($)).find(profile => profile.name === viewed) ?? activeProfile($)
   )
+}
+
+const userFolders = async ($: EngineInterface) =>
+  userFoldersOf(await $.env.get('HOME'), await $.env.get('CLAUDE_CONFIG_DIR'))
+
+const focusShown = async ($: EngineInterface) => {
+  try {
+    const { deny } = await $.ui.focus({
+      requestId: PANE,
+      key: menuKeyOf((await shownProfile($)).name),
+    })
+    if (deny !== undefined) throw new Error(deny)
+  } catch (error) {
+    $.ui.log(`pristine left the focus where it was: ${messageOf(error)}`, { to: 'debug' })
+  }
 }
 
 const setView = ($: EngineInterface, patch: Partial<View>) =>
@@ -181,6 +239,15 @@ const noteSeen = async ($: EngineInterface, found: readonly Item[]) => {
 
     return unlisted.length === 0 ? items : sorted([...items, ...unlisted])
   })
+}
+
+const shownItems = async ($: EngineInterface) => {
+  const items = await read($, itemsAtom)
+  const files = await read($, projectItemsAtom)
+
+  return (await read($, viewAtom)).project === ''
+    ? withSessionFiles(items, files)
+    : withProjectFiles(items, files)
 }
 
 const say = async ($: EngineInterface, notice: string) => {
@@ -286,20 +353,120 @@ const refresh = async ($: EngineInterface) => {
   return items
 }
 
-const load = async ($: EngineInterface) => {
-  const stored = await $.store.get(PROFILES_KEY)
-  const isFirstRun = stored === undefined
-  const kept = Array.isArray(stored) ? stored.filter(isProfile) : []
-  const { profiles, active } = restoredProfiles(
-    isFirstRun ? undefined : kept,
-    await $.store.get(ACTIVE_KEY),
+const existingOf = async <Found,>(
+  $: EngineInterface,
+  candidates: readonly Found[],
+  pathsOf: (candidate: Found) => readonly string[],
+) => {
+  const checked = await Promise.all(
+    candidates.map(async candidate => ({
+      candidate,
+      found: await Promise.all(pathsOf(candidate).map(path => $.fs.exists(path))),
+    })),
   )
+
+  return checked.filter(one => one.found.includes(true)).map(one => one.candidate)
+}
+
+const markdownUnder = async (
+  $: EngineInterface,
+  folder: string,
+  depth = MAX_RULES_DEPTH,
+): Promise<string[]> => {
+  if (depth === 0 || !(await $.fs.exists(folder))) return []
+  const found = await Promise.all(
+    (await $.fs.list(folder)).map(async entry => {
+      const path = `${folder}/${entry.name}`
+      if (entry.kind === 'dir') return markdownUnder($, path, depth - 1)
+
+      return isMarkdownFile(entry) ? [path] : []
+    }),
+  )
+
+  return found.flat()
+}
+
+const loadProjectFiles = async ($: EngineInterface, project: string) => {
+  const { configDir, root } = await settingsPaths($)
+  const folder = project === '' ? root : project
+  const files = await existingOf($, namedFilesOf(configDir, folder), file => [file.path])
+  const rules = await Promise.all(
+    rulesFoldersOf(folder).map(one => markdownUnder($, one)),
+  )
+  const items = fileItems(files, rules.flat(), await userFolders($))
+
+  return update($, projectItemsAtom, () => items)
+}
+
+const refreshProjects = async ($: EngineInterface) => {
+  try {
+    const root = await $.session.root()
+    const projects = await existingOf($, visibleFolders(await $.fs.list(root), root), markersOf)
+    await update($, projectsAtom, () => projects)
+    await loadProjectFiles($, (await read($, viewAtom)).project)
+  } catch (error) {
+    await setView($, { notice: `Projects could not be listed: ${messageOf(error)}` })
+  }
+}
+
+const showProject = async ($: EngineInterface, typed: string) => {
+  const root = await $.session.root()
+  const named = typed.replace(TRAILING_SLASHES, '')
+  const path = named === '' || named.startsWith('/') ? named : `${root}/${named}`
+  const project = path === root ? '' : path
+  const isFolder =
+    project === '' ||
+    ((await $.fs.exists(project)) && (await $.fs.stat(project)).kind === 'dir')
+  if (!isFolder) return say($, `No folder is at ${project}.`)
+  await loadProjectFiles($, project)
+  await setView($, { project, page: 0, picker: 'none' })
+
+  return say($, `Showing the project ${project === '' ? root : project}.`)
+}
+
+const load = async ($: EngineInterface) => {
+  const { isFirstRun, profiles, active } = await storedProfiles($)
   await update($, profilesAtom, () => profiles)
   await update($, activeAtom, () => active)
   if (isFirstRun) await $.store.set(PROFILES_KEY, profiles)
   $.ui.status(undefined)
 
   return isFirstRun
+}
+
+const loadAll = async ($: EngineInterface) => {
+  const isFirstRun = await load($)
+  await refresh($)
+  await update($, loadedAtom, () => true)
+
+  return isFirstRun
+}
+
+const loadOnce = ($: EngineInterface) => {
+  loading ??= loadAll($).finally(() => {
+    loading = undefined
+  })
+
+  return loading
+}
+
+const ensureLoaded = async ($: EngineInterface) => {
+  if (!(await read($, loadedAtom))) await loadOnce($)
+}
+
+const inTurn = <Result,>(
+  $: EngineInterface,
+  work: () => Promise<Result>,
+): Promise<Result> => {
+  const loadedWork = async () => {
+    await ensureLoaded($)
+
+    return work()
+  }
+  const run = lastMutation.then(loadedWork, loadedWork)
+  lastMutation = run.catch(() => undefined)
+
+  return run
 }
 
 const setPersisted = async ($: EngineInterface, item: Item, isOn: boolean) => {
@@ -325,7 +492,7 @@ const setPersisted = async ($: EngineInterface, item: Item, isOn: boolean) => {
 }
 
 const toggle = async ($: EngineInterface, id: string) => {
-  const item = (await read($, itemsAtom)).find(one => one.id === id)
+  const item = (await shownItems($)).find(one => one.id === id)
   if (item === undefined) {
     await refresh($)
 
@@ -347,7 +514,7 @@ const toggle = async ($: EngineInterface, id: string) => {
   }
   await saveProfiles(
     $,
-    upsertProfile(await read($, profilesAtom), withOverride(profile, id, isOn)),
+    upsertProfile(await profilesOf($), withOverride(profile, id, isOn)),
   )
   await refresh($)
   invalidateGates($)
@@ -394,7 +561,7 @@ const activate = async ($: EngineInterface, profile: Profile) => {
 }
 
 const switchProfile = async ($: EngineInterface, name: string) => {
-  const profile = (await read($, profilesAtom)).find(one => one.name === name)
+  const profile = (await profilesOf($)).find(one => one.name === name)
   if (profile === undefined) return say($, `No profile is named "${name}".`)
   const { changed, errors } = await activate($, profile)
   const failures = errors.length === 0 ? '' : ` Failed: ${errors.join('; ')}.`
@@ -407,7 +574,7 @@ const switchProfile = async ($: EngineInterface, name: string) => {
 }
 
 const addProfile = async ($: EngineInterface, created: Profile) => {
-  const profiles = await read($, profilesAtom)
+  const profiles = await profilesOf($)
   const problem = nameProblem(profiles, created.name)
   if (problem !== undefined) return say($, problem)
   await saveProfiles($, [...profiles, created])
@@ -416,7 +583,7 @@ const addProfile = async ($: EngineInterface, created: Profile) => {
 }
 
 const duplicateProfile = async ($: EngineInterface, from: string, name: string) => {
-  const source = (await read($, profilesAtom)).find(profile => profile.name === from)
+  const source = (await profilesOf($)).find(profile => profile.name === from)
   if (source === undefined) return say($, `No profile is named "${from}".`)
 
   return addProfile($, { ...source, name })
@@ -434,14 +601,14 @@ const createProfile = async (
 const renameTo = async ($: EngineInterface, from: string, to: string) => {
   if (isFixedProfile(from))
     return say($, `"${from}" is built in and cannot be renamed.`)
-  const profiles = await read($, profilesAtom)
+  const profiles = await profilesOf($)
   if (!profiles.some(profile => profile.name === from))
     return say($, `No profile is named "${from}".`)
   const problem = nameProblem(profiles, to)
   if (problem !== undefined) return say($, problem)
   await saveProfiles($, renameProfile(profiles, from, to))
   await forgetProfile($, from, to)
-  if ((await read($, activeAtom)) === from) {
+  if ((await activeNameOf($)) === from) {
     await update($, activeAtom, () => to)
     await $.store.set(ACTIVE_KEY, to)
   }
@@ -455,21 +622,23 @@ const submitName = async (
   work: (name: string) => Promise<string>,
 ) => {
   const name = typed.trim()
-  const problem = nameProblem(await read($, profilesAtom), name)
+  const problem = nameProblem(await profilesOf($), name)
   if (problem !== undefined) return say($, problem)
   await setView($, { edit: 'none' })
+  const said = await work(name)
+  await focusShown($)
 
-  return work(name)
+  return said
 }
 
 const deleteProfile = async ($: EngineInterface, name: string) => {
   if (isFixedProfile(name))
     return say($, `"${name}" is built in and cannot be deleted.`)
-  const profiles = await read($, profilesAtom)
+  const profiles = await profilesOf($)
   if (!profiles.some(profile => profile.name === name))
     return say($, `No profile is named "${name}".`)
   const kept = removeProfile(profiles, name)
-  if ((await read($, activeAtom)) === name) {
+  if ((await activeNameOf($)) === name) {
     const { errors } = await activate($, fallbackProfile(kept))
     if (errors.length > 0)
       return say($, `Profile "${name}" was kept; leaving it failed: ${errors.join('; ')}.`)
@@ -481,7 +650,7 @@ const deleteProfile = async ($: EngineInterface, name: string) => {
 }
 
 const restoreAll = async ($: EngineInterface) => {
-  const profiles = await read($, profilesAtom)
+  const profiles = await profilesOf($)
   const applied = await activeProfile($)
   const kept = isFixedProfile(applied.name) ? fallbackProfile(profiles) : applied
   const untouched: Profile = {
@@ -502,7 +671,7 @@ const restoreAll = async ($: EngineInterface) => {
 const nameFirstProfile = async ($: EngineInterface) => {
   const name = (await $.ui.ask(FIRST_NAME_QUESTION, FIRST_NAME_OPTIONS)).trim()
   if (name === DEFAULT_PROFILE_NAME) return
-  await inTurn(() => renameTo($, DEFAULT_PROFILE_NAME, name))
+  await inTurn($, () => renameTo($, DEFAULT_PROFILE_NAME, name))
 }
 
 const runProfileAction = async (
@@ -510,15 +679,16 @@ const runProfileAction = async (
   name: string,
   action: ProfileAction,
 ) => {
-  if (action === 'apply') {
-    await setView($, { edit: 'none' })
+  if (action === 'duplicate' || action === 'rename') {
+    await setView($, { edit: action === 'duplicate' ? 'new' : 'rename', target: name })
 
-    return switchProfile($, name)
+    return name
   }
-  if (action === 'delete') return deleteProfile($, name)
-  await setView($, { edit: action === 'duplicate' ? 'new' : 'rename', target: name })
+  if (action === 'apply') await setView($, { edit: 'none' })
+  const said = await (action === 'apply' ? switchProfile($, name) : deleteProfile($, name))
+  await focusShown($)
 
-  return name
+  return said
 }
 
 const isOff = async ($: EngineInterface, id: string, kind: Kind) => {
@@ -544,6 +714,7 @@ const isKnownOff = async ($: EngineInterface, id: string, kind: Kind) => {
 }
 
 const isHookEventMuted = async ($: EngineInterface, event: string) => {
+  await ensureLoaded($)
   const item = (await read($, itemsAtom)).find(one => one.id === `hook-event:${event}`)
 
   return item !== undefined && !isEnabled(await activeProfile($), item)
@@ -554,6 +725,7 @@ const offNote = async ($: EngineInterface, what: string) =>
 
 const openPane = async ($: EngineInterface) => {
   await refresh($)
+  await refreshProjects($)
   await $.ui.open({ id: PANE, title: 'Pristine', focus: true, rows: PANE_ROWS })
 
   return 'Pristine pane opened.'
@@ -562,7 +734,7 @@ const openPane = async ($: EngineInterface) => {
 const listProfiles = async ($: EngineInterface) => {
   const active = await activeProfile($)
 
-  return (await read($, profilesAtom))
+  return (await profilesOf($))
     .map(
       profile =>
         `${profile.name === active.name ? '*' : ' '} ${profile.name} (base ${profile.base}, ${Object.keys(profile.overrides).length} overrides)`,
@@ -585,16 +757,18 @@ const runCommand = async ($: EngineInterface, args: string, origin: PromptOrigin
   const [verb = '', name = '', option = ''] = args.trim().split(/\s+/)
   if (!READ_ONLY_VERBS.includes(verb) && !PERSON_ORIGINS.includes(origin.kind))
     return 'Only the person at the prompt can change pristine profiles.'
+  await ensureLoaded($)
   if (verb === '') return openPane($)
   if (verb === 'list') return listProfiles($)
   if (verb === 'status') return status($)
-  if (verb === 'restore') return inTurn(() => restoreAll($))
-  if (verb === 'use' && name !== '') return inTurn(() => switchProfile($, name))
-  if (verb === 'delete' && name !== '') return inTurn(() => deleteProfile($, name))
+  if (verb === 'project') return showProject($, name)
+  if (verb === 'restore') return inTurn($, () => restoreAll($))
+  if (verb === 'use' && name !== '') return inTurn($, () => switchProfile($, name))
+  if (verb === 'delete' && name !== '') return inTurn($, () => deleteProfile($, name))
   if (verb === 'rename' && name !== '' && option !== '')
-    return inTurn(() => renameTo($, name, option))
+    return inTurn($, () => renameTo($, name, option))
   if (verb === 'new' && name !== '')
-    return inTurn(() =>
+    return inTurn($, () =>
       createProfile($, name, option === 'on' || option === 'off' ? option : undefined),
     )
 
@@ -607,11 +781,10 @@ export const register: Register = on => {
       name: 'pristine',
       description: 'Manage harness profiles, scopes and on/off for every harness element',
       argumentHint:
-        '[list | status | use <profile> | new <profile> | rename <profile> <new name> | delete <profile> | restore]',
+        '[list | status | use <profile> | new <profile> | rename <profile> <new name> | delete <profile> | restore | project [<folder>]]',
     })
     try {
-      const isFirstRun = await load($)
-      await refresh($)
+      const isFirstRun = await loadOnce($)
       if (isFirstRun)
         void nameFirstProfile($).catch(error =>
           $.ui.log(`pristine kept the name "default": ${messageOf(error)}`, {
@@ -635,6 +808,7 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     try {
+      await ensureLoaded($)
       await refresh($)
     } catch (error) {
       $.ui.log(`pristine could not refresh the harness: ${messageOf(error)}`)
@@ -647,8 +821,12 @@ export const register: Register = on => {
     const answered = await next(e)
     const files = answered.instructionFiles ?? e.instructionFiles
     if (files === undefined) return answered
+    await ensureLoaded($).catch(error =>
+      $.ui.log(`pristine could not read the harness: ${messageOf(error)}`),
+    )
     const profile = await activeProfile($)
-    const items = files.map(instructionItem)
+    const folders = await userFolders($)
+    const items = files.map(file => instructionItem(inUserScope(file, folders)))
     await noteSeen($, items)
     const kept = files.filter((file, index) => {
       const item = items[index]
@@ -840,8 +1018,10 @@ export const register: Register = on => {
     return drawPane(
       $.ui.resolve(e),
       {
-        items: await read($, itemsAtom),
-        profiles: await read($, profilesAtom),
+        items: await shownItems($),
+        root: await $.session.root(),
+        projects: await read($, projectsAtom),
+        profiles: await profilesOf($),
         profile,
         applied,
         isOn: item => isOnIn(profile, item, ledger, isApplied),
@@ -851,22 +1031,24 @@ export const register: Register = on => {
         isDocked: e.props.placement === 'dock',
       },
       {
-        onToggle: id => void inTurn(() => toggle($, id)).catch(report),
+        onToggle: id => void inTurn($, () => toggle($, id)).catch(report),
         onAction: (name, action) =>
-          void inTurn(() => runProfileAction($, name, action)).catch(report),
+          void inTurn($, () => runProfileAction($, name, action)).catch(report),
         onCreate: typed =>
-          void inTurn(() =>
+          void inTurn($, () =>
             submitName($, typed, name => duplicateProfile($, view.target, name)),
           ).catch(report),
         onRename: typed =>
-          void inTurn(() =>
+          void inTurn($, () =>
             submitName($, typed, name => renameTo($, view.target, name)),
           ).catch(report),
-        onRestore: () => void inTurn(() => restoreAll($)).catch(report),
+        onRestore: () => void inTurn($, () => restoreAll($)).catch(report),
         onRefresh: () =>
           void refresh($)
+            .then(() => refreshProjects($))
             .then(() => setView($, { notice: 'Refreshed.' }))
             .catch(report),
+        onProject: path => void showProject($, path).catch(report),
         onView: patch => void setView($, patch).catch(report),
       },
     )
