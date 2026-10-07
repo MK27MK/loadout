@@ -7,7 +7,7 @@ export type SettingsPaths = Record<WritableSource, string> & {
   root: string
 }
 
-const BACKUP_FOLDER = 'pristine-backups'
+const BACKUP_FOLDER = 'loadout-backups'
 const JSON_INDENT = 2
 const UNSAFE_FILE_CHARACTERS = /[^A-Za-z0-9]+/g
 

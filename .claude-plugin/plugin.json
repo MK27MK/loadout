@@ -1,10 +1,10 @@
 {
-  "name": "pristine",
+  "name": "loadout",
   "version": "0.2.0",
   "author": { "name": "Mattia Carella" },
   "description": "Harness manager: switchable profiles, scope provenance and on/off for every harness element",
-  "homepage": "https://github.com/MK27MK/pristine",
-  "repository": "https://github.com/MK27MK/pristine",
+  "homepage": "https://github.com/MK27MK/loadout",
+  "repository": "https://github.com/MK27MK/loadout",
   "license": "MIT",
   "types": "./types/index.d.ts"
 }

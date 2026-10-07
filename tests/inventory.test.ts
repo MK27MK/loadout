@@ -92,13 +92,13 @@ describe('settingsFound', () => {
     expect(found.items).toEqual([])
   })
 
-  test('never lets a profile switch pristine itself off', () => {
+  test('never lets a profile switch loadout itself off', () => {
     const found = settingsFound(
       [
         {
           source: 'user',
           origin: PATHS.user,
-          value: { enabledPlugins: { 'pristine@pristine': true } },
+          value: { enabledPlugins: { 'loadout@loadout': true } },
         },
       ],
       EMPTY_LEDGER,
@@ -122,7 +122,7 @@ describe('commandItems', () => {
     { name: 'ecc:plan', description: '', source: 'plugin' as const, plugin: 'ecc' },
     { name: 'deploy', description: '', source: 'user' as const },
     { name: 'mine', description: '', source: 'user' as const },
-    { name: 'pristine', description: '', source: 'plugin' as const, plugin: 'pristine' },
+    { name: 'loadout', description: '', source: 'plugin' as const, plugin: 'loadout' },
   ]
 
   test('names the plugin and its install scope, and skips built-ins and itself', () => {
@@ -179,9 +179,9 @@ describe('mcpItems', () => {
   })
 
   test('lists a server named like the mod itself so it can be switched off', () => {
-    const tools = [{ name: 'mcp__pristine__run', description: '', mcp: true }]
+    const tools = [{ name: 'mcp__loadout__run', description: '', mcp: true }]
 
-    expect(mcpItems(tools, [], PATHS).map(item => item.id)).toEqual(['mcp:pristine'])
+    expect(mcpItems(tools, [], PATHS).map(item => item.id)).toEqual(['mcp:loadout'])
   })
 })
 

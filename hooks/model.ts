@@ -1,6 +1,6 @@
 import type { Item, Kind, Ledger, Profile, Scope } from '../types'
 
-export const PLUGIN = 'pristine'
+export const PLUGIN = 'loadout'
 export const DEFAULT_PROFILE_NAME = 'default'
 export const VANILLA_PROFILE_NAME = 'vanilla'
 export const DEFAULT_PROFILE: Profile = {
@@ -84,12 +84,12 @@ export const desiredState = (profile: Profile, item: Item, ledger: Ledger) => {
   if (item.isLocked) return item.isOn
   const override = profile.overrides[item.id]
   if (override !== undefined) return override
-  const wasOnBeforePristine =
+  const wasOnBeforeLoadout =
     !ledger.raised.includes(item.id) &&
     (item.isOn || ledger.stash[item.id] !== undefined)
-  if (KINDS_KEPT_BY_BASE.includes(item.kind)) return wasOnBeforePristine
+  if (KINDS_KEPT_BY_BASE.includes(item.kind)) return wasOnBeforeLoadout
 
-  return profile.base === 'on' && wasOnBeforePristine
+  return profile.base === 'on' && wasOnBeforeLoadout
 }
 
 export const isShownOn = (profile: Profile, item: Item) =>

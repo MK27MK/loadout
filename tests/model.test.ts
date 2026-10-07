@@ -85,7 +85,7 @@ describe('desiredState', () => {
     expect(desiredState(VANILLA, PLUGIN_FLAG, EMPTY_LEDGER)).toBe(false)
   })
 
-  test('restores under an all-on base only what pristine turned off', () => {
+  test('restores under an all-on base only what loadout turned off', () => {
     const off = { ...PLUGIN_FLAG, isOn: false }
 
     const stashed = { stash: { [off.id]: off }, raised: [] }

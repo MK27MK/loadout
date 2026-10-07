@@ -62,7 +62,7 @@ import {
 import { isObject, isSoundStashedItem } from './settingsEdit'
 import { drawBand, drawPane, menuKeyOf } from './view'
 
-const PANE = 'pristine'
+const PANE = 'loadout'
 const PANE_ROWS = 24
 const FALLBACK_ROWS = 30
 const FALLBACK_COLUMNS = 100
@@ -78,7 +78,7 @@ const LOCKED_SOURCES = [
 const READ_ONLY_VERBS = ['', 'list', 'status']
 const PERSON_ORIGINS: readonly string[] = ['composer', 'bridge']
 const USAGE =
-  'Usage: /pristine [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | restore | project [<folder>]]'
+  'Usage: /loadout [list | status | use <profile> | new <profile> [on|off] | rename <profile> <new name> | delete <profile> | restore | project [<folder>]]'
 const NO_ITEMS: Item[] = []
 const NO_PROJECTS: string[] = []
 const MAX_RULES_DEPTH = 4
@@ -97,23 +97,23 @@ const INITIAL_VIEW: View = {
 }
 const VIEW_SHAPE = 'sections-v5'
 const FIRST_NAME_QUESTION =
-  'What should pristine call the profile that carries your current setup?'
+  'What should loadout call the profile that carries your current setup?'
 const FIRST_NAME_OPTIONS = {
   header: 'Profile',
   options: [DEFAULT_PROFILE_NAME, 'personal'],
 } as const
 
-const profilesAtom = atom({ plugin: 'pristine', key: 'profiles' } as const, STARTING_PROFILES)
-const activeAtom = atom({ plugin: 'pristine', key: 'active' } as const, DEFAULT_PROFILE_NAME)
-const loadedAtom = atom({ plugin: 'pristine', key: 'isLoaded' } as const, false)
-const seenAtom = atom({ plugin: 'pristine', key: 'seen' } as const, NO_ITEMS)
-const itemsAtom = atom({ plugin: 'pristine', key: 'items' } as const, NO_ITEMS)
-const projectsAtom = atom({ plugin: 'pristine', key: 'projects' } as const, NO_PROJECTS)
+const profilesAtom = atom({ plugin: 'loadout', key: 'profiles' } as const, STARTING_PROFILES)
+const activeAtom = atom({ plugin: 'loadout', key: 'active' } as const, DEFAULT_PROFILE_NAME)
+const loadedAtom = atom({ plugin: 'loadout', key: 'isLoaded' } as const, false)
+const seenAtom = atom({ plugin: 'loadout', key: 'seen' } as const, NO_ITEMS)
+const itemsAtom = atom({ plugin: 'loadout', key: 'items' } as const, NO_ITEMS)
+const projectsAtom = atom({ plugin: 'loadout', key: 'projects' } as const, NO_PROJECTS)
 const projectItemsAtom = atom(
-  { plugin: 'pristine', key: 'projectItems' } as const,
+  { plugin: 'loadout', key: 'projectItems' } as const,
   NO_ITEMS,
 )
-const viewAtom = atom({ plugin: 'pristine', key: 'view' } as const, INITIAL_VIEW, {
+const viewAtom = atom({ plugin: 'loadout', key: 'view' } as const, INITIAL_VIEW, {
   shape: VIEW_SHAPE,
 })
 
@@ -222,7 +222,7 @@ const focusShown = async ($: EngineInterface) => {
     })
     if (deny !== undefined) throw new Error(deny)
   } catch (error) {
-    $.ui.log(`pristine left the focus where it was: ${messageOf(error)}`, { to: 'debug' })
+    $.ui.log(`loadout left the focus where it was: ${messageOf(error)}`, { to: 'debug' })
   }
 }
 
@@ -476,7 +476,7 @@ const setPersisted = async ($: EngineInterface, item: Item, isOn: boolean) => {
   if (path !== item.origin)
     throw new Error(`${item.name} belongs to ${item.origin}, not to this project`)
   if (item.entry.source !== 'user' && (await isSymbolicLink($, path)))
-    throw new Error(`${path} is a symbolic link; pristine does not write through it`)
+    throw new Error(`${path} is a symbolic link; loadout does not write through it`)
   const { value, text } = await readObject($, path)
   const ledger = await loadLedger($)
   const rewritten = rewrittenSettings(
@@ -663,7 +663,7 @@ const restoreAll = async ($: EngineInterface) => {
   return say(
     $,
     errors.length === 0
-      ? `Everything pristine turned off is back on; profile "${untouched.name}" is active.`
+      ? `Everything loadout turned off is back on; profile "${untouched.name}" is active.`
       : `Profile "${untouched.name}" is active, but these were not restored: ${errors.join('; ')}.`,
   )
 }
@@ -721,14 +721,14 @@ const isHookEventMuted = async ($: EngineInterface, event: string) => {
 }
 
 const offNote = async ($: EngineInterface, what: string) =>
-  `${what} is turned off in the active pristine profile "${(await activeProfile($)).name}". Re-enable it with /pristine.`
+  `${what} is turned off in the active loadout profile "${(await activeProfile($)).name}". Re-enable it with /loadout.`
 
 const openPane = async ($: EngineInterface) => {
   await refresh($)
   await refreshProjects($)
-  await $.ui.open({ id: PANE, title: 'Pristine', focus: true, rows: PANE_ROWS })
+  await $.ui.open({ id: PANE, title: 'Loadout', focus: true, rows: PANE_ROWS })
 
-  return 'Pristine pane opened.'
+  return 'Loadout pane opened.'
 }
 
 const listProfiles = async ($: EngineInterface) => {
@@ -756,7 +756,7 @@ const status = async ($: EngineInterface) => {
 const runCommand = async ($: EngineInterface, args: string, origin: PromptOrigin) => {
   const [verb = '', name = '', option = ''] = args.trim().split(/\s+/)
   if (!READ_ONLY_VERBS.includes(verb) && !PERSON_ORIGINS.includes(origin.kind))
-    return 'Only the person at the prompt can change pristine profiles.'
+    return 'Only the person at the prompt can change loadout profiles.'
   await ensureLoaded($)
   if (verb === '') return openPane($)
   if (verb === 'list') return listProfiles($)
@@ -778,7 +778,7 @@ const runCommand = async ($: EngineInterface, args: string, origin: PromptOrigin
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'pristine',
+      name: 'loadout',
       description: 'Manage harness profiles, scopes and on/off for every harness element',
       argumentHint:
         '[list | status | use <profile> | new <profile> | rename <profile> <new name> | delete <profile> | restore | project [<folder>]]',
@@ -787,22 +787,22 @@ export const register: Register = on => {
       const isFirstRun = await loadOnce($)
       if (isFirstRun)
         void nameFirstProfile($).catch(error =>
-          $.ui.log(`pristine kept the name "default": ${messageOf(error)}`, {
+          $.ui.log(`loadout kept the name "default": ${messageOf(error)}`, {
             to: 'debug',
           }),
         )
     } catch (error) {
-      $.ui.log(`pristine could not read the harness: ${messageOf(error)}`)
+      $.ui.log(`loadout could not read the harness: ${messageOf(error)}`)
     }
 
     return next(e)
   })
 
-  on('command.run', { command: 'pristine' }, async ($, e) => {
+  on('command.run', { command: 'loadout' }, async ($, e) => {
     try {
       return { text: await runCommand($, e.args, e.origin) }
     } catch (error) {
-      return { text: `pristine failed: ${messageOf(error)}` }
+      return { text: `loadout failed: ${messageOf(error)}` }
     }
   })
 
@@ -811,7 +811,7 @@ export const register: Register = on => {
       await ensureLoaded($)
       await refresh($)
     } catch (error) {
-      $.ui.log(`pristine could not refresh the harness: ${messageOf(error)}`)
+      $.ui.log(`loadout could not refresh the harness: ${messageOf(error)}`)
     }
 
     return next(e)
@@ -822,7 +822,7 @@ export const register: Register = on => {
     const files = answered.instructionFiles ?? e.instructionFiles
     if (files === undefined) return answered
     await ensureLoaded($).catch(error =>
-      $.ui.log(`pristine could not read the harness: ${messageOf(error)}`),
+      $.ui.log(`loadout could not read the harness: ${messageOf(error)}`),
     )
     const profile = await activeProfile($)
     const folders = await userFolders($)
@@ -854,7 +854,7 @@ export const register: Register = on => {
 
     return {
       ...described,
-      description: `[off in pristine] ${described.description}`,
+      description: `[off in loadout] ${described.description}`,
       isHidden: true,
     }
   })
@@ -881,7 +881,7 @@ export const register: Register = on => {
 
     return {
       ...described,
-      description: `[Disabled by the user's pristine profile: do not call.] ${described.description}`,
+      description: `[Disabled by the user's loadout profile: do not call.] ${described.description}`,
     }
   })
 
@@ -1000,14 +1000,14 @@ export const register: Register = on => {
 
     return drawBand($.ui.resolve(e), (await activeProfile($)).name, () =>
       void openPane($).catch(error =>
-        $.ui.toast(`pristine could not open its pane: ${messageOf(error)}`),
+        $.ui.toast(`loadout could not open its pane: ${messageOf(error)}`),
       ),
     )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
-    const report = (error: unknown) => void say($, `pristine failed: ${messageOf(error)}`)
+    const report = (error: unknown) => void say($, `loadout failed: ${messageOf(error)}`)
 
     const view = await read($, viewAtom)
     const applied = (await activeProfile($)).name

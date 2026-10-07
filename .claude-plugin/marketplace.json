@@ -1,5 +1,5 @@
 {
-  "name": "pristine",
+  "name": "loadout",
   "owner": { "name": "Mattia Carella" },
-  "plugins": [{ "name": "pristine", "source": "./" }]
+  "plugins": [{ "name": "loadout", "source": "./" }]
 }

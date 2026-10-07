@@ -84,7 +84,7 @@ export type Ledger = {
 
 declare module 'claude-code' {
   interface PluginState {
-    pristine: {
+    loadout: {
       profiles: Profile[]
       active: string
       isLoaded: boolean

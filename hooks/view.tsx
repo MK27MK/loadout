@@ -132,7 +132,7 @@ export const drawBand = (
       key="open-pane"
       plain
       dimColor
-      label={`↗ pristine · ${profileName}`}
+      label={`↗ loadout · ${profileName}`}
       onPress={onOpen}
     />
   </Box>
@@ -355,7 +355,7 @@ export const drawPane = (
       <Box flexDirection="row" justifyContent="space-between">
         <Box flexDirection="row" gap={1}>
           <Text bold color="claude">
-            Pristine
+            Loadout
           </Text>
           <Text dimColor>
             {profile.name} · base {profile.base} · {offCount} of {items.length} off

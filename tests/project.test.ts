@@ -16,10 +16,10 @@ const fileItem = (path: string, kind: 'user' | 'project' | 'memory') =>
 
 describe('project paths', () => {
   test('lists a folder and every folder above it, outermost first', () => {
-    expect(ancestorsOf('/work/app/pristine')).toEqual([
+    expect(ancestorsOf('/work/app/loadout')).toEqual([
       '/work',
       '/work/app',
-      '/work/app/pristine',
+      '/work/app/loadout',
     ])
   })
 

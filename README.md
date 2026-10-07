@@ -1,23 +1,23 @@
-# pristine
+# loadout
 
 A Claude Code mod that manages your harness: every skill, rule, memory, MCP server, hook, plugin, permission and setting, with one switch each and profiles to swap whole setups.
 
 ## Install
 
 ```
-/plugin marketplace add MK27MK/pristine
-/plugin install pristine@pristine
+/plugin marketplace add MK27MK/loadout
+/plugin install loadout@loadout
 ```
 
 To run it from a local clone instead:
 
 ```
-claude --plugin-dir path/to/pristine
+claude --plugin-dir path/to/loadout
 ```
 
 ## The pane
 
-`/pristine` opens the pane. Each row is one harness element:
+`/loadout` opens the pane. Each row is one harness element:
 
 ```
 ● on   ecc:plan              plugin   plugin ecc (user)
@@ -28,7 +28,7 @@ locked hooks.Stop            policy   managed settings
 - Press the toggle to turn an element on or off.
 - `Show` filters by kind, `Scope` filters by scope.
 - `Profile` switches profile. The input below it creates a new profile from the current one.
-- `Restore all` turns back on everything pristine turned off.
+- `Restore all` turns back on everything loadout turned off.
 
 Keys: Tab moves between controls, Enter presses, Esc returns to the prompt.
 
@@ -69,31 +69,31 @@ Every row shows where the element comes from:
 A profile is a base (`on` or `off`) plus the elements you toggled.
 
 - `default`: your harness as it is.
-- `pristine`: everything off. Permissions and settings stay on unless you toggle them yourself.
+- `vanilla`: everything off. Permissions and settings stay on unless you toggle them yourself.
 
 To compose a setup from several harnesses, create a profile with base `off` and switch on the pieces you want:
 
 ```
-/pristine new ecc-react off
+/loadout new ecc-react off
 ```
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `/pristine` | Opens the pane |
-| `/pristine status` | Lists what is off in the active profile |
-| `/pristine list` | Lists the profiles |
-| `/pristine use <profile>` | Switches profile |
-| `/pristine new <profile> [on\|off]` | Creates a profile. Without a base, copies the active one. |
-| `/pristine delete <profile>` | Deletes a profile |
-| `/pristine restore` | Turns everything back on and switches to `default` |
+| `/loadout` | Opens the pane |
+| `/loadout status` | Lists what is off in the active profile |
+| `/loadout list` | Lists the profiles |
+| `/loadout use <profile>` | Switches profile |
+| `/loadout new <profile> [on\|off]` | Creates a profile. Without a base, copies the active one. |
+| `/loadout delete <profile>` | Deletes a profile |
+| `/loadout restore` | Turns everything back on and switches to `default` |
 
-Only you can change profiles. A `/pristine use` that you did not type is refused.
+Only you can change profiles. A `/loadout use` that you did not type is refused.
 
 ## Safety
 
-- Before the first change to a settings file, pristine copies it to `<config dir>/pristine-backups/`.
+- Before the first change to a settings file, loadout copies it to `<config dir>/loadout-backups/`.
 - A removed entry is stored and restored only into the file it came from.
 - Setting values are never shown, only their keys.
 - Project settings behind a symbolic link are not written.
