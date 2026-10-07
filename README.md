@@ -17,18 +17,19 @@ claude --plugin-dir path/to/loadout
 
 ## The pane
 
-`/loadout` opens the pane. Each row is one harness element:
+`/loadout` opens the pane. Elements are grouped by kind, and each row is one harness element:
 
 ```
-● on   ecc:plan              plugin   plugin ecc (user)
-○ off  rules/testing.md      user     ~/.claude/rules/ecc/testing.md
-locked hooks.Stop            policy   managed settings
+☑ ecc:plan              plugin   plugin ecc (user)
+☐ rules/testing.md      user     ~/.claude/rules/ecc/testing.md
+☑ hooks.Stop            policy   locked · managed settings
 ```
 
-- Press the toggle to turn an element on or off.
-- `Show` filters by kind, `Scope` filters by scope.
-- `Profile` switches profile. The input below it creates a new profile from the current one.
-- `Restore all` turns back on everything loadout turned off.
+- Press the checkbox to turn an element on or off.
+- `Project` picks the project whose files are listed, `Scope` filters by scope.
+- The tabs at the bottom are the profiles, with the applied one in brackets. Press a tab to look at a profile. Its `▸` menu applies, duplicates, renames or deletes it.
+- `+` duplicates the profile you are looking at under a new name.
+- `Refresh` reads the harness again.
 
 Keys: Tab moves between controls, Enter presses, Esc returns to the prompt.
 
@@ -66,12 +67,12 @@ Every row shows where the element comes from:
 
 ## Profiles
 
-A profile is a base (`on` or `off`) plus the elements you toggled.
+A profile starts with everything on or everything off, and remembers the elements you toggled.
 
 - `default`: your harness as it is.
-- `vanilla`: everything off. Permissions and settings stay on unless you toggle them yourself.
+- `vanilla`: everything off, except permissions and settings. It is built in and cannot be changed, renamed or deleted. Duplicate it to build on it.
 
-To compose a setup from several harnesses, create a profile with base `off` and switch on the pieces you want:
+To compose a setup from several harnesses, create a profile that starts with everything off and switch on the pieces you want:
 
 ```
 /loadout new ecc-react off
@@ -85,9 +86,10 @@ To compose a setup from several harnesses, create a profile with base `off` and 
 | `/loadout status` | Lists what is off in the active profile |
 | `/loadout list` | Lists the profiles |
 | `/loadout use <profile>` | Switches profile |
-| `/loadout new <profile> [on\|off]` | Creates a profile. Without a base, copies the active one. |
+| `/loadout new <profile> [on\|off]` | Creates a profile with everything on or everything off. Without either, copies the active one. |
+| `/loadout rename <profile> <new name>` | Renames a profile |
 | `/loadout delete <profile>` | Deletes a profile |
-| `/loadout restore` | Turns everything back on and switches to `default` |
+| `/loadout project [<folder>]` | Lists the files of another project folder. Without a folder, goes back to the session's project. |
 
 Only you can change profiles. A `/loadout use` that you did not type is refused.
 
