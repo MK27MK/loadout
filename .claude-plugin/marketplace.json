@@ -1,5 +1,6 @@
 {
   "name": "loadout",
+  "description": "Harness manager for Claude Code: profiles, scopes and on/off for every harness element",
   "owner": { "name": "Mattia Carella" },
   "plugins": [{ "name": "loadout", "source": "./" }]
 }
