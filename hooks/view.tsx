@@ -48,8 +48,11 @@ const OPEN_MARK = '▾'
 const CLOSED_MARK = '▸'
 const KINDS_WITHOUT_SECTION: readonly Kind[] = ['instruction']
 const PROFILE_KEY_PREFIX = 'profile:'
-const MENU_VALUE = 'menu'
-const MENU_MARK = '▾'
+const MENU_KEY_PREFIX = 'menu:'
+const ACTION_KEY_PREFIX = 'action:'
+const PROFILE_KEY_PREFIXES = [PROFILE_KEY_PREFIX, MENU_KEY_PREFIX] as const
+const MENU_CLOSED_MARK = '▸'
+const MENU_OPEN_MARK = '◂'
 const APPLIED_COLOR = 'success'
 const PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate', 'rename', 'delete']
 const FIXED_PROFILE_ACTIONS: readonly ProfileAction[] = ['apply', 'duplicate']
@@ -66,8 +69,11 @@ export const visibleItems = (items: readonly Item[], view: View) =>
 export const actionsOf = (name: string) =>
   isFixedProfile(name) ? FIXED_PROFILE_ACTIONS : PROFILE_ACTIONS
 
-export const profileOfKey = (key: string | undefined) =>
-  key?.startsWith(PROFILE_KEY_PREFIX) ? key.slice(PROFILE_KEY_PREFIX.length) : ''
+export const profileOfKey = (key: string | undefined) => {
+  const prefix = PROFILE_KEY_PREFIXES.find(one => key?.startsWith(one))
+
+  return key !== undefined && prefix !== undefined ? key.slice(prefix.length) : ''
+}
 
 export const pageSize = (rows: number) => Math.max(MIN_LIST_ROWS, rows - CHROME_ROWS)
 
@@ -179,27 +185,41 @@ export const drawPane = (
 
   const drawProfile = (one: Profile) => {
     const isApplied = one.name === profile.name
-    const offered = actionsOf(one.name)
+    const isMenuOpen = view.edit === 'menu' && view.target === one.name
+    const isLit = isMenuOpen || one.name === focused
 
     return (
       <Box flexDirection="row" gap={1}>
         <Box flexDirection="row">
           {isApplied && <Text color={APPLIED_COLOR}>[</Text>}
-          <Text dimColor={one.name !== focused}>{one.name}</Text>
+          <Button
+            key={`${PROFILE_KEY_PREFIX}${one.name}`}
+            plain
+            dimColor={!isLit}
+            label={one.name}
+            onPress={() => actions.onView({ focused: one.name })}
+          />
           {isApplied && <Text color={APPLIED_COLOR}>]</Text>}
         </Box>
-        <Select
-          key={`${PROFILE_KEY_PREFIX}${one.name}`}
-          value={MENU_VALUE}
-          options={[
-            { value: MENU_VALUE, label: MENU_MARK },
-            ...offered.map(action => ({ value: action })),
-          ]}
-          onSelect={value => {
-            const action = offered.find(candidate => candidate === value)
-            if (action !== undefined) actions.onAction(one.name, action)
-          }}
-        />
+        {isLit && (
+          <Button
+            key={`${MENU_KEY_PREFIX}${one.name}`}
+            plain
+            label={isMenuOpen ? MENU_OPEN_MARK : MENU_CLOSED_MARK}
+            onPress={() =>
+              actions.onView(isMenuOpen ? { edit: 'none' } : { edit: 'menu', target: one.name })
+            }
+          />
+        )}
+        {isMenuOpen &&
+          actionsOf(one.name).map(action => (
+            <Button
+              key={`${ACTION_KEY_PREFIX}${action}`}
+              plain
+              label={action}
+              onPress={() => actions.onAction(one.name, action)}
+            />
+          ))}
       </Box>
     )
   }

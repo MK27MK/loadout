@@ -57,7 +57,7 @@ export type Profile = {
   overrides: Record<string, boolean>
 }
 
-export type ProfileEdit = 'none' | 'new' | 'rename'
+export type ProfileEdit = 'none' | 'menu' | 'new' | 'rename'
 
 export type ProfileAction = 'apply' | 'duplicate' | 'rename' | 'delete'
 

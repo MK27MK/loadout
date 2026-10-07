@@ -154,11 +154,30 @@ const mountBand = ($: Engine, surface: 'terminal' | 'desktop') =>
 const startSession = ($: Engine) =>
   $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
 
-const optionsOf = async (ui: Awaited<ReturnType<typeof mountPane>>, key: string) => {
-  const select = await ui.find({ key })
-  const options = (select?.props.options ?? []) as { value: string }[]
+type MountedPane = Awaited<ReturnType<typeof mountPane>>
 
-  return options.map(option => option.value)
+const PROFILE_ACTIONS = ['apply', 'duplicate', 'rename', 'delete']
+
+const openMenu = async (ui: MountedPane, name: string) => {
+  await ui.press({ key: `profile:${name}` })
+  await ui.press({ key: `menu:${name}` })
+}
+
+const act = async (ui: MountedPane, name: string, action: string) => {
+  await openMenu(ui, name)
+  await ui.press({ key: `action:${action}` })
+}
+
+const actionsOf = async (ui: MountedPane, name: string) => {
+  await openMenu(ui, name)
+  const found = await Promise.all(
+    PROFILE_ACTIONS.map(async action => ({
+      action,
+      isOffered: (await ui.find({ key: `action:${action}` })) !== undefined,
+    })),
+  )
+
+  return found.filter(one => one.isOffered).map(one => one.action)
 }
 
 const mountPaneWithOpen = async ($: Engine, ...kinds: string[]) => {
@@ -524,7 +543,7 @@ test('switches profile from the tab bar', async ($, on) => {
   await pristine($, 'status')
   const ui = await mountPane($)
 
-  await ui.select({ key: 'profile:vanilla', value: 'apply' })
+  await act(ui, 'vanilla', 'apply')
   const listed = await pristine($, 'list')
 
   expect(listed.text).toContain('* vanilla')
@@ -555,7 +574,7 @@ test('renames the active profile from the pane and keeps it active', async ($, o
   const ui = await mountPaneWithOpen($, 'skill')
   await ui.press({ key: 'toggle:skill:ecc:plan' })
 
-  await ui.select({ key: 'profile:temp', value: 'rename' })
+  await act(ui, 'temp', 'rename')
   await ui.input({ key: 'rename-profile-name', text: 'ecc-react' })
   const listed = await pristine($, 'list')
 
@@ -571,14 +590,8 @@ test('offers every action on default and no rename or delete on vanilla', async 
   await pristine($, 'status')
   const ui = await mountPane($)
 
-  expect(await optionsOf(ui, 'profile:default')).toEqual([
-    'menu',
-    'apply',
-    'duplicate',
-    'rename',
-    'delete',
-  ])
-  expect(await optionsOf(ui, 'profile:vanilla')).toEqual(['menu', 'apply', 'duplicate'])
+  expect(await actionsOf(ui, 'default')).toEqual(['apply', 'duplicate', 'rename', 'delete'])
+  expect(await actionsOf(ui, 'vanilla')).toEqual(['apply', 'duplicate'])
   await ui.unmount()
 })
 
@@ -587,7 +600,7 @@ test('duplicates a profile that is not applied from its dropdown', async ($, on)
   await pristine($, 'status')
   const ui = await mountPane($)
 
-  await ui.select({ key: 'profile:vanilla', value: 'duplicate' })
+  await act(ui, 'vanilla', 'duplicate')
   const field = await ui.find({ key: 'new-profile-name' })
   await ui.input({ key: 'new-profile-name', text: 'bare' })
   const listed = await pristine($, 'list')
@@ -603,7 +616,7 @@ test('renames default like any other profile and keeps it applied', async ($, on
   await pristine($, 'status')
   const ui = await mountPane($)
 
-  await ui.select({ key: 'profile:default', value: 'rename' })
+  await act(ui, 'default', 'rename')
   await ui.input({ key: 'rename-profile-name', text: 'mine' })
   const listed = await pristine($, 'list')
 
@@ -617,7 +630,7 @@ test('deletes default from its dropdown and applies the next profile left', asyn
   await pristine($, 'status')
   const ui = await mountPane($)
 
-  await ui.select({ key: 'profile:default', value: 'delete' })
+  await act(ui, 'default', 'delete')
   const listed = await pristine($, 'list')
 
   expect(listed.text).toBe('* vanilla (base off, 0 overrides)')
@@ -632,7 +645,7 @@ test('deletes a profile that is not applied and leaves the applied one alone', a
   await pristine($, 'use default')
   const ui = await mountPane($)
 
-  await ui.select({ key: 'profile:temp', value: 'delete' })
+  await act(ui, 'temp', 'delete')
   const listed = await pristine($, 'list')
 
   expect(listed.text).toContain('* default')
@@ -675,8 +688,8 @@ test('closes the name field of a profile once that profile is deleted', async ($
   await pristine($, 'new temp off')
   const ui = await mountPane($)
 
-  await ui.select({ key: 'profile:temp', value: 'duplicate' })
-  await ui.select({ key: 'profile:temp', value: 'delete' })
+  await act(ui, 'temp', 'duplicate')
+  await act(ui, 'temp', 'delete')
 
   expect(await ui.find({ key: 'new-profile-name' })).toBeUndefined()
   await ui.unmount()
@@ -702,7 +715,7 @@ test('brackets the applied profile in green and lights the focused one', async (
   await pristine($, 'status')
   const ui = await mountPane($)
   const nameOf = async (name: string) =>
-    (await ui.findAll({ type: 'Text', text: name })).at(-1)?.props.dimColor
+    (await ui.find({ key: `profile:${name}` }))?.props.dimColor
 
   const brackets = await ui.findAll({ type: 'Text', text: /^[[\]]$/ })
   const atRest = [await nameOf('default'), await nameOf('vanilla')]
@@ -714,13 +727,46 @@ test('brackets the applied profile in green and lights the focused one', async (
     origin: { kind: 'person' },
   })
   const focused = [await nameOf('default'), await nameOf('vanilla')]
-  await ui.select({ key: 'profile:vanilla', value: 'apply' })
+  await act(ui, 'vanilla', 'apply')
   const applied = (await pristine($, 'list')).text
 
   expect(brackets.map(one => one.props.color)).toEqual(['success', 'success'])
   expect(atRest).toEqual([true, true])
   expect(focused).toEqual([true, false])
   expect(applied).toContain('* vanilla')
+  await ui.unmount()
+})
+
+test('focuses a profile when its name is clicked and draws one arrow beside it alone', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+  const arrowsAtRest = await ui.findAll({ type: 'Button', text: /^[▸◂▾]$/ })
+
+  await ui.press({ key: 'profile:vanilla' })
+  const arrows = await ui.findAll({ type: 'Button', text: /^[▸◂▾]$/ })
+
+  expect(arrowsAtRest).toEqual([])
+  expect(arrows.map(one => one.text)).toEqual(['▸'])
+  expect(await ui.find({ key: 'menu:vanilla' })).toBeDefined()
+  expect((await ui.find({ key: 'profile:vanilla' }))?.props.dimColor).toBe(false)
+  expect((await ui.find({ key: 'profile:default' }))?.props.dimColor).toBe(true)
+  expect(await ui.findAll({ type: 'Select', text: /[▸◂▾]/ })).toEqual([])
+  await ui.unmount()
+})
+
+test('opens the actions beside the arrow and folds them on a second press', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+
+  await openMenu(ui, 'default')
+  const whenOpen = await ui.find({ key: 'action:apply' })
+  await ui.press({ key: 'menu:default' })
+  const whenFolded = await ui.find({ key: 'action:apply' })
+
+  expect(whenOpen).toBeDefined()
+  expect(whenFolded).toBeUndefined()
   await ui.unmount()
 })
 
@@ -856,7 +902,7 @@ test('asks for a name before it creates or renames a profile', async ($, on) => 
   const field = await ui.find({ key: 'new-profile-name' })
   await ui.input({ key: 'new-profile-name', text: '  ' })
   const stillAsking = await ui.find({ key: 'new-profile-name' })
-  await ui.select({ key: 'profile:temp', value: 'rename' })
+  await act(ui, 'temp', 'rename')
   await ui.input({ key: 'rename-profile-name', text: '' })
 
   expect(field?.props.placeholder).toBe('name')

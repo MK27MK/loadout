@@ -486,7 +486,11 @@ const runProfileAction = async (
   name: string,
   action: ProfileAction,
 ) => {
-  if (action === 'apply') return switchProfile($, name)
+  if (action === 'apply') {
+    await setView($, { edit: 'none' })
+
+    return switchProfile($, name)
+  }
   if (action === 'delete') return deleteProfile($, name)
   await setView($, { edit: action === 'duplicate' ? 'new' : 'rename', target: name })
 
