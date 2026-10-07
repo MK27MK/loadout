@@ -37,6 +37,11 @@ const RULE_FILE = {
   content: 'write tests first',
 } as const
 const CLAUDE_MD = { path: `${ROOT}/CLAUDE.md`, kind: 'project', content: 'be brief' } as const
+const MEMORY_FILE = {
+  path: `${HOME}/.claude/projects/repo/memory/MEMORY.md`,
+  kind: 'memory',
+  content: '- a remembered fact',
+} as const
 
 const PROJECT_SETTINGS_PATH = `${ROOT}/.claude/settings.json`
 const BACKUP_PATH = `${HOME}/.claude/pristine-backups/_home_me_claude_settings_json.json`
@@ -890,6 +895,20 @@ test('lists a CLAUDE.md as a row of its own, outside any section', async ($, on)
   expect(await ui.find({ key: 'section:instruction' })).toBeUndefined()
   expect(await ui.find({ key: 'section:rule' })).toBeDefined()
   expect(after.instructionFiles).toEqual([RULE_FILE])
+  await ui.unmount()
+})
+
+test('lists a memory file seen after the pane opened without a refresh', async ($, on) => {
+  harness(on)
+  await pristine($, 'status')
+  const ui = await mountPane($)
+  const before = await ui.find({ key: 'section:memory' })
+
+  await $.prompt.context({ blocks: [], instructionFiles: [CLAUDE_MD, MEMORY_FILE] })
+  const after = await ui.find({ key: 'section:memory' })
+
+  expect(before).toBeUndefined()
+  expect(after).toBeDefined()
   await ui.unmount()
 })
 

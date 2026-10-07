@@ -161,6 +161,18 @@ const activeProfile = async ($: EngineInterface) =>
 const setView = ($: EngineInterface, patch: Partial<View>) =>
   update($, viewAtom, view => ({ ...view, ...patch }))
 
+const noteSeen = async ($: EngineInterface, found: readonly Item[]) => {
+  await update($, seenAtom, seen => [
+    ...seen.filter(old => !found.some(item => item.id === old.id)),
+    ...found,
+  ])
+  await update($, itemsAtom, items => {
+    const unlisted = found.filter(item => !items.some(one => one.id === item.id))
+
+    return unlisted.length === 0 ? items : sorted([...items, ...unlisted])
+  })
+}
+
 const say = async ($: EngineInterface, notice: string) => {
   await setView($, { notice })
   $.ui.toast(notice)
@@ -625,10 +637,7 @@ export const register: Register = on => {
     if (files === undefined) return answered
     const profile = await activeProfile($)
     const items = files.map(instructionItem)
-    await update($, seenAtom, seen => [
-      ...seen.filter(old => !items.some(item => item.id === old.id)),
-      ...items,
-    ])
+    await noteSeen($, items)
     const kept = files.filter((file, index) => {
       const item = items[index]
 
@@ -643,9 +652,7 @@ export const register: Register = on => {
   on('agent.offer', async ($, e, next) => {
     if (e.provider.tier === CORE_TIER || e.provider.plugin === PLUGIN) return next(e)
     const item = agentItem(e.agent, e.source, e.provider.plugin)
-    await update($, seenAtom, seen =>
-      seen.some(one => one.id === item.id) ? seen : [...seen, item],
-    )
+    await noteSeen($, [item])
 
     return isEnabled(await activeProfile($), item) ? next(e) : { isOffered: false }
   }).catch(($, e, next) => next(e))
