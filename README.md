@@ -2,6 +2,8 @@
 
 A Claude Code mod that manages your harness: every skill, rule, memory, MCP server, hook, plugin, permission and setting, with one switch each and profiles to swap whole setups.
 
+![The loadout pane next to a Claude Code session](assets/showcase.png)
+
 ## Install
 
 ```
